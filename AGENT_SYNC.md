@@ -81,6 +81,23 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 
 ### 3. Dashboard Dosen (`prefix: dosen`, `middleware: auth, role:dosen`)
 
+#### Model `Test` (Pembaruan Skema)
+- **Kolom Tabel `tests`**:
+  - `id` (`bigint`)
+  - `dosen_id` (`foreignId -> users`)
+  - `judul` (`string`)
+  - `tipe_ujian` (`enum: 'pilihan_ganda', 'essai'`) *(Baru)*
+  - `tanggal` (`date`)
+  - `jam_mulai` (`time`)
+  - `jam_selesai` (`time`)
+  - `durasi` (`unsignedInteger`, menit)
+  - `sifat` (`enum: 'fleksibel', 'ketat'`)
+- **Helper Model**:
+  - `$test->isPilihanGanda()`: `bool`
+  - `$test->isEssai()`: `bool`
+  - `$test->tipe_ujian_label`: `string` ('Pilihan Ganda' | 'Esai')
+  - `$test->mulai_at`, `$test->selesai_at`, `$test->berlangsung()`, `$test->selesai()`
+
 #### `GET /dosen`
 - **Route Name**: `dosen.index`
 - **Controller**: `DosenController@index`
@@ -88,17 +105,16 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Data ke View**:
   - `$aktif` (`Illuminate\Support\Collection<App\Models\Test>`): Daftar tes yang belum selesai (`!$t->selesai()`).
   - `$riwayat` (`Illuminate\Support\Collection<App\Models\Test>`): Daftar tes yang sudah lewat/selesai (`$t->selesai()`).
-    - Model `Test`: `id`, `dosen_id`, `judul`, `tanggal`, `jam_mulai`, `jam_selesai`, `durasi`, `sifat`, `created_at`, `updated_at`.
-    - Method bantuan pada model: `mulai_at`, `selesai_at`, `berlangsung()`, `selesai()`.
 
 #### `GET /dosen/tes/baru`
 - **Route Name**: `dosen.create`
 - **Controller**: `DosenController@create`
 - **Target Blade**: `resources/views/dosen/form.blade.php`
 - **Data ke View**:
-  - `$test` (`App\Models\Test`): Instance baru Test dengan default `durasi = 90`, `sifat = 'fleksibel'`.
+  - `$test` (`App\Models\Test`): Instance baru Test dengan default `durasi = 90`, `sifat = 'fleksibel'`, `tipe_ujian = 'pilihan_ganda'`.
 - **Form Submission**: `POST /dosen/tes` (`route('dosen.store')`)
   - `judul`: `required|string|max:255`
+  - `tipe_ujian`: `required|in:pilihan_ganda,essai` (default jika kosong: `pilihan_ganda`)
   - `tanggal`: `required|date`
   - `jam_mulai`: `required|date_format:H:i`
   - `jam_selesai`: `required|date_format:H:i|after:jam_mulai`
@@ -124,10 +140,8 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Target Blade**: `resources/views/dosen/soal.blade.php`
 - **Data ke View**:
   - `$test` (`App\Models\Test` eager load `questions`): Instance model `Test` beserta koleksi `questions`.
-    - Relasi: `$test->questions` (`Collection<App\Models\Question>`).
-    - Model `Question`: `id`, `test_id`, `tipe` (`pilihan_ganda`|`essai`), `pertanyaan`, `opsi_a`, `opsi_b`, `opsi_c`, `opsi_d`, `jawaban_benar`, `media_type` (`gambar`|`link`|`null`), `media_url`.
 - **Form Submission**: `POST /dosen/tes/{test}/soal` (`route('dosen.soal.store', $test)`)
-  - `tipe`: `required|in:pilihan_ganda,essai`
+  - `tipe`: `nullable|in:pilihan_ganda,essai` (otomatis mengikuti `$test->tipe_ujian` jika tidak disertakan)
   - `pertanyaan`: `required|string`
   - `media_type`: `nullable|in:gambar,link`
   - `media_url`: `nullable|url|max:2048|required_with:media_type`
@@ -148,9 +162,70 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Target Blade**: `resources/views/dosen/nilai.blade.php`
 - **Data ke View**:
   - `$test` (`App\Models\Test`): Data tes.
-  - `$attempts` (`Illuminate\Database\Eloquent\Collection<App\Models\Attempt>`): Daftar pengerjaan mahasiswa beserta relasi `user`.
-    - Relasi: `$attempt->user` (`App\Models\User`).
-    - Properti Attempt: `id`, `test_id`, `user_id`, `started_at`, `finished_at`, `nilai`.
+  - `$attempts` (`Illuminate\Database\Eloquent\Collection<App\Models\Attempt>`): Daftar pengerjaan mahasiswa beserta eager loading `user` dan `answers.question`.
+    - Relasi: `$attempt->user` (`App\Models\User`), `$attempt->answers` (`Collection<App\Models\Answer>`).
+    - Properti Attempt: `id`, `test_id`, `user_id`, `started_at`, `finished_at`, `nilai` (bernilai `null` jika ujian esai belum dinilai).
+
+#### `POST|PUT /dosen/ujian/{test}/nilai/{attempt}` *(Baru)*
+- **Route Name**: `dosen.nilai.update` (Alias URL: `/dosen/tes/{test}/nilai/{attempt}`)
+- **Controller**: `DosenController@updateNilai`
+- **Kegunaan**: Dosen menginput atau memperbarui nilai ujian essai mahasiswa.
+- **Request Form / JSON**:
+  - `nilai`: `required|numeric|min:0|max:100`
+- **Response**:
+  - **Jika JSON / AJAX**:
+    ```json
+    {
+      "status": "success",
+      "message": "Nilai berhasil disimpan.",
+      "attempt_id": 1,
+      "nilai": 88.5
+    }
+    ```
+  - **Jika Form Standar**: Redirect `back()->with('ok', 'Nilai mahasiswa berhasil diperbarui.')`.
+
+#### `GET /dosen/ujian/{test}/live-monitoring` *(Baru)*
+- **Route Name**: `dosen.live-monitoring` (Alias URL: `/dosen/tes/{test}/live-monitoring`)
+- **Controller**: `DosenController@liveMonitoring`
+- **Kegunaan**: Polling AJAX near real-time oleh frontend dosen untuk memantau ketikan jawaban essai mahasiswa yang sedang berlangsung.
+- **Response JSON**:
+  ```json
+  {
+    "status": "success",
+    "test": {
+      "id": 1,
+      "judul": "Ujian Akhir Semester Essai",
+      "tipe_ujian": "essai"
+    },
+    "server_time": "2026-10-31T00:45:00.000000Z",
+    "attempts": [
+      {
+        "attempt_id": 12,
+        "user": {
+          "id": 5,
+          "name": "Bahlil Lahadalia",
+          "nomor_induk": "2405090032",
+          "avatar": null
+        },
+        "started_at": "2026-10-31T00:10:00.000000Z",
+        "finished_at": null,
+        "is_finished": false,
+        "nilai": null,
+        "updated_at": "2026-10-31T00:44:50.000000Z",
+        "answers": [
+          {
+            "id": 101,
+            "question_id": 3,
+            "pertanyaan": "Jelaskan perbedaan synchronous dan asynchronous programming!",
+            "tipe": "essai",
+            "jawaban_essai": "Synchronous mengeksekusi proses secara sekuensial, sedangkan...",
+            "updated_at": "2026-10-31T00:44:50.000000Z"
+          }
+        ]
+      }
+    ]
+  }
+  ```
 
 ---
 
@@ -170,14 +245,52 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Controller**: `MahasiswaController@mulai`
 - **Target Blade**: `resources/views/mahasiswa/ujian.blade.php`
 - **Data ke View**:
-  - `$test` (`App\Models\Test`): Ujian yang sedang dikerjakan.
-  - `$questions` (`Illuminate\Database\Eloquent\Collection<App\Models\Question>`): Daftar soal terurut berdasarkan `id`.
-  - `$sisaDetik` (`int`): Sisa durasi ujian dalam detik (berdasarkan deadline pengerjaan dan sifat ujian).
-- **Form Submission**: `POST /mahasiswa/tes/{test}/kirim` (`route('mhs.kirim', $test)`)
+  - `$test` (`App\Models\Test`): Ujian yang sedang dikerjakan. Memiliki atribut `$test->tipe_ujian` (`pilihan_ganda`|`essai`).
+  - `$questions` (`Illuminate\Database\Eloquent\Collection<App\Models\Question>`): Daftar butir soal.
+  - `$sisaDetik` (`int`): Sisa durasi ujian dalam detik.
+
+#### `POST /mahasiswa/ujian/{test}/autosave` *(Baru)*
+- **Route Name**: `mhs.autosave` (Alias URL: `/mahasiswa/tes/{test}/autosave`)
+- **Controller**: `MahasiswaController@autosave`
+- **Kegunaan**: AJAX auto-save saat mahasiswa sedang mengetik jawaban essai (gunakan debounce misal 1-2 detik pada event `input`/`keyup`).
+- **Request Headers**:
+  - `Content-Type: application/json`
+  - `X-CSRF-TOKEN`: nilai dari `<meta name="csrf-token" content="{{ csrf_token() }}">`
+- **Request Payload JSON**:
+  - `question_id`: `required|exists:questions,id`
+  - `jawaban_essai`: `nullable|string|max:65535`
+- **Response JSON**:
+  - **Success (200)**:
+    ```json
+    {
+      "status": "saved",
+      "updated_at": "2026-10-31T00:44:12.000000Z"
+    }
+    ```
+  - **Error (403 / 404)**:
+    ```json
+    {
+      "status": "error",
+      "message": "Waktu pengerjaan ujian telah berakhir."
+    }
+    ```
+
+#### `POST /mahasiswa/tes/{test}/kirim`
+- **Route Name**: `mhs.kirim` (Alias URL: `/mahasiswa/ujian/{test}/kirim`)
+- **Controller**: `MahasiswaController@kirim`
+- **Logika Penilaian & Penyimpanan**:
+  - Menggunakan `Answer::updateOrCreate()` agar sinkron dengan auto-save dan tidak menimbulkan record duplikat.
+  - **Jika `test.tipe_ujian == 'pilihan_ganda'`**:
+    - Nilai dihitung otomatis dari persentase jawaban benar.
+    - Nilai disimpan ke `attempts.nilai`.
+  - **Jika `test.tipe_ujian == 'essai'`**:
+    - Nilai pada `attempts.nilai` dibiarkan **`null`** (Status: **Menunggu Penilaian**).
+- **Form Submission**:
   - `jawaban`: `nullable|array` (Key: `question_id`, Value: `a`|`b`|`c`|`d`)
   - `jawaban.*`: `nullable|in:a,b,c,d`
   - `jawaban_essai`: `nullable|array` (Key: `question_id`, Value: `string`)
-  - `jawaban_essai.*`: `nullable|string|max:20000`
+  - `jawaban_essai.*`: `nullable|string|max:65535`
+- **Redirect**: `route('mhs.hasil', $test)`
 
 #### `GET /mahasiswa/tes/{test}/hasil`
 - **Route Name**: `mhs.hasil`
@@ -186,8 +299,8 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Data ke View**:
   - `$test` (`App\Models\Test`): Objek ujian.
   - `$attempt` (`App\Models\Attempt` eager load `answers.question`): Data pengerjaan user.
-    - Relasi: `$attempt->answers` (`Collection<App\Models\Answer>`), masing-masing dengan `$answer->question`.
-  - `$durasiDetik` (`int`): Total waktu pengerjaan dalam satuan detik.
+    - `$attempt->nilai`: Jika `test.tipe_ujian == 'essai'` dan belum dinilai dosen, nilai ini bernilai `null` (Frontend dapat menampilkan badge: `Menunggu Penilaian Dosen`).
+  - `$durasiDetik` (`int`): Total waktu pengerjaan dalam detik.
 
 ---
 
@@ -205,8 +318,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Controller**: `AdminController@detail`
 - **Target Blade**: `resources/views/admin/detail.blade.php`
 - **Data ke View**:
-  - `$test` (`App\Models\Test` eager load `dosen`, `attempts.user` dan count `questions`):
-    - Relasi: `$test->dosen` (`User`), `$test->attempts` (`Collection<Attempt>`), `$test->questions_count` (`int`).
+  - `$test` (`App\Models\Test` eager load `dosen`, `attempts.user` dan count `questions`).
 
 #### `GET /admin/pengguna/{role}`
 - **Route Name**: `admin.users`
@@ -223,17 +335,6 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Data ke View**:
   - `$role` (`string`): `mahasiswa` atau `dosen`.
   - `$user` (`App\Models\User`): Instance kosong model User.
-- **Form Submission**: `POST /admin/pengguna/{role}` (`route('admin.users.store', $role)`)
-  - `name`: `required|string|max:255`
-  - `email`: `required|email|max:255|unique:users,email`
-  - `nomor_induk`: `required|string|max:30|unique:users,nomor_induk`
-  - `no_hp`: `nullable|string|max:30`
-  - `fakultas`: `required|string|max:255`
-  - `prodi`: `required|string|max:255`
-  - `tempat_lahir`: `nullable|string|max:255`
-  - `tanggal_lahir`: `nullable|date`
-  - `status`: `required|in:aktif,nonaktif`
-  - `password`: `required|string|min:8|confirmed`
 
 #### `GET /admin/pengguna/{role}/{user}`
 - **Route Name**: `admin.users.show`
@@ -250,5 +351,3 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Data ke View**:
   - `$role` (`string`): `mahasiswa` atau `dosen`.
   - `$user` (`App\Models\User`): Data user yang akan diedit.
-- **Form Submission**: `PUT /admin/pengguna/{role}/{user}` (`route('admin.users.update', [$role, $user])`)
-  - Aturan validasi sama dengan create, kecuali `email` dan `nomor_induk` mengabaikan user saat ini, serta `password` bersifat `nullable|string|min:8|confirmed`.

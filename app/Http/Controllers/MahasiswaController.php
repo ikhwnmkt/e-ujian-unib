@@ -34,6 +34,61 @@ class MahasiswaController extends Controller
         ]);
     }
 
+    public function autosave(Request $r, Test $test)
+    {
+        $attempt = Attempt::where('test_id', $test->id)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (!$attempt) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Sesi ujian tidak ditemukan. Silakan mulai ujian terlebih dahulu.',
+            ], 404);
+        }
+
+        if ($attempt->finished_at) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ujian telah selesai diserahkan.',
+            ], 403);
+        }
+
+        $deadline = $this->deadline($attempt, $test);
+        if (now()->gt($deadline)) {
+            $attempt->update(['finished_at' => $deadline]);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Waktu pengerjaan ujian telah berakhir.',
+            ], 403);
+        }
+
+        $validated = $r->validate([
+            'question_id' => 'required|exists:questions,id',
+            'jawaban_essai' => 'nullable|string|max:65535',
+        ]);
+
+        $question = $test->questions()->where('id', $validated['question_id'])->firstOrFail();
+
+        $answer = Answer::updateOrCreate(
+            [
+                'attempt_id' => $attempt->id,
+                'question_id' => $question->id,
+            ],
+            [
+                'jawaban_essai' => $validated['jawaban_essai'] ?? '',
+                'benar' => false,
+            ]
+        );
+
+        $attempt->touch();
+
+        return response()->json([
+            'status' => 'saved',
+            'updated_at' => $answer->updated_at->toIso8601String(),
+        ]);
+    }
+
     public function kirim(Request $r, Test $test)
     {
         $attempt = Attempt::where('test_id', $test->id)->where('user_id', auth()->id())->firstOrFail();
@@ -43,29 +98,58 @@ class MahasiswaController extends Controller
             'jawaban' => 'nullable|array',
             'jawaban.*' => 'nullable|in:a,b,c,d',
             'jawaban_essai' => 'nullable|array',
-            'jawaban_essai.*' => 'nullable|string|max:20000',
+            'jawaban_essai.*' => 'nullable|string|max:65535',
         ]);
         $jawab = $validated['jawaban'] ?? [];
         $jawabanEssai = $validated['jawaban_essai'] ?? [];
         $questions = $test->questions;
         $pilihanGanda = $questions->where('tipe', 'pilihan_ganda');
         $benar = 0;
+
         foreach ($questions as $q) {
-            $j = $q->tipe === 'pilihan_ganda' ? ($jawab[$q->id] ?? null) : null;
-            $essay = $q->tipe === 'essai' ? ($jawabanEssai[$q->id] ?? null) : null;
-            $ok = $q->tipe === 'pilihan_ganda' && $j === $q->jawaban_benar;
-            $benar += $ok ? 1 : 0;
-            Answer::create([
-                'attempt_id' => $attempt->id,
-                'question_id' => $q->id,
-                'jawaban' => $j,
-                'jawaban_essai' => $essay,
-                'benar' => $ok,
-            ]);
+            if ($q->tipe === 'pilihan_ganda') {
+                $j = $jawab[$q->id] ?? null;
+                $ok = ($j !== null && $j === $q->jawaban_benar);
+                $benar += $ok ? 1 : 0;
+
+                Answer::updateOrCreate(
+                    [
+                        'attempt_id' => $attempt->id,
+                        'question_id' => $q->id,
+                    ],
+                    [
+                        'jawaban' => $j,
+                        'benar' => $ok,
+                    ]
+                );
+            } else {
+                $essay = $jawabanEssai[$q->id] ?? null;
+                $existing = Answer::where('attempt_id', $attempt->id)->where('question_id', $q->id)->first();
+
+                Answer::updateOrCreate(
+                    [
+                        'attempt_id' => $attempt->id,
+                        'question_id' => $q->id,
+                    ],
+                    [
+                        'jawaban_essai' => $essay !== null ? $essay : ($existing?->jawaban_essai ?? ''),
+                        'benar' => false,
+                    ]
+                );
+            }
         }
+
+        // Jika tipe ujian adalah essai, nilai bernilai null (status: Menunggu Penilaian)
+        // Jika pilihan ganda, nilai dihitung otomatis
+        if ($test->tipe_ujian === 'essai') {
+            $nilai = null;
+        } else {
+            $nilai = $pilihanGanda->count() ? round($benar / $pilihanGanda->count() * 100, 2) : 0;
+        }
+
         $attempt->update([
             'finished_at' => now()->min($this->deadline($attempt, $test)),
-            'nilai' => $pilihanGanda->count() ? round($benar / $pilihanGanda->count() * 100, 2) : null,
+            'nilai' => $nilai,
         ]);
         return redirect()->route('mhs.hasil', $test);
     }

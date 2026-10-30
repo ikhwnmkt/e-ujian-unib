@@ -33,12 +33,19 @@ Route::middleware('auth')->group(function () {
         Route::post('/tes/{test}/soal', [DosenController::class, 'soalStore'])->name('soal.store');
         Route::delete('/tes/{test}/soal/{question}', [DosenController::class, 'soalDestroy'])->name('soal.destroy');
         Route::get('/tes/{test}/nilai', [DosenController::class, 'nilai'])->name('nilai');
+        Route::match(['post', 'put'], '/ujian/{test}/nilai/{attempt}', [DosenController::class, 'updateNilai'])->name('nilai.update');
+        Route::match(['post', 'put'], '/tes/{test}/nilai/{attempt}', [DosenController::class, 'updateNilai']);
+        Route::get('/ujian/{test}/live-monitoring', [DosenController::class, 'liveMonitoring'])->name('live-monitoring');
+        Route::get('/tes/{test}/live-monitoring', [DosenController::class, 'liveMonitoring']);
     });
 
     Route::prefix('mahasiswa')->name('mhs.')->middleware(RoleMiddleware::class . ':mahasiswa')->group(function () {
         Route::get('/', [MahasiswaController::class, 'index'])->name('index');
         Route::get('/tes/{test}/mulai', [MahasiswaController::class, 'mulai'])->name('mulai');
+        Route::post('/ujian/{test}/autosave', [MahasiswaController::class, 'autosave'])->name('autosave');
+        Route::post('/tes/{test}/autosave', [MahasiswaController::class, 'autosave']);
         Route::post('/tes/{test}/kirim', [MahasiswaController::class, 'kirim'])->name('kirim');
+        Route::post('/ujian/{test}/kirim', [MahasiswaController::class, 'kirim']);
         Route::get('/tes/{test}/hasil', [MahasiswaController::class, 'hasil'])->name('hasil');
     });
 

@@ -6,12 +6,18 @@ use Carbon\Carbon;
 
 class Test extends Model
 {
-    protected $fillable = ['dosen_id','judul','tanggal','jam_mulai','jam_selesai','durasi','sifat'];
+    protected $fillable = ['dosen_id','judul','tanggal','jam_mulai','jam_selesai','durasi','sifat','tipe_ujian'];
     protected $casts = ['tanggal' => 'date'];
 
     public function dosen() { return $this->belongsTo(User::class, 'dosen_id'); }
     public function questions() { return $this->hasMany(Question::class); }
     public function attempts() { return $this->hasMany(Attempt::class); }
+
+    public function isPilihanGanda(): bool { return ($this->tipe_ujian ?? 'pilihan_ganda') === 'pilihan_ganda'; }
+    public function isEssai(): bool { return $this->tipe_ujian === 'essai'; }
+    public function getTipeUjianLabelAttribute(): string {
+        return $this->tipe_ujian === 'essai' ? 'Esai' : 'Pilihan Ganda';
+    }
 
     public function getMulaiAtAttribute(): Carbon {
         return Carbon::parse($this->tanggal->format('Y-m-d') . ' ' . $this->jam_mulai);

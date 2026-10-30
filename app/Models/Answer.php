@@ -6,4 +6,5 @@ class Answer extends Model
 {
     protected $fillable = ['attempt_id','question_id','jawaban','jawaban_essai','benar'];
     public function question() { return $this->belongsTo(Question::class); }
+    public function attempt() { return $this->belongsTo(Attempt::class); }
 }

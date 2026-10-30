@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 use App\Models\Answer;
 use App\Models\Attempt;
 use App\Models\Test;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class MahasiswaController extends Controller
 {
@@ -37,45 +39,88 @@ class MahasiswaController extends Controller
 
     public function mulai(Test $test)
     {
-        $attempt = Attempt::where('test_id', $test->id)
-            ->where('user_id', auth()->id())
-            ->latest('id')
-            ->first();
+        $userId = auth()->id();
 
-        if ($attempt && $attempt->finished_at !== null) {
-            $kkm = $test->kkm ?? 70;
-            $canRemedial = ($test->tipe_ujian === 'pilihan_ganda' || empty($test->tipe_ujian))
-                && $attempt->nilai !== null
-                && (float) $attempt->nilai < (float) $kkm
-                && $test->berlangsung();
+        $result = DB::transaction(function () use ($test, $userId) {
+            // Lock baris user untuk serialisasi per mahasiswa (mencegah double attempt simultan)
+            User::where('id', $userId)->lockForUpdate()->first();
 
-            if (!$canRemedial) {
-                return redirect()->route('mhs.hasil', $test);
+            $attempt = Attempt::where('test_id', $test->id)
+                ->where('user_id', $userId)
+                ->latest('id')
+                ->first();
+
+            // Tugas 4: Jika attempt belum selesai tapi deadline sudah lewat, auto-finalize
+            if ($attempt && $attempt->finished_at === null) {
+                $deadline = $this->deadline($attempt, $test);
+                if (now()->gt($deadline)) {
+                    $this->finalizeAttempt($attempt, $test, $deadline);
+                }
             }
 
-            // Jika boleh remedial dan waktu ujian masih aktif, buat Attempt baru
-            $attempt = null;
-        }
+            // Jika attempt sudah selesai (atau baru saja di-finalize karena expired)
+            if ($attempt && $attempt->finished_at !== null) {
+                $kkm = $test->kkm ?? 70;
+                $canRemedial = ($test->tipe_ujian === 'pilihan_ganda' || empty($test->tipe_ujian))
+                    && $attempt->nilai !== null
+                    && (float) $attempt->nilai < (float) $kkm
+                    && $test->berlangsung();
 
-        if (!$attempt) {
-            if (!$test->berlangsung()) {
-                return back()->with('err', 'Tes belum dibuka atau sudah berakhir.');
+                if (!$canRemedial) {
+                    return redirect()->route('mhs.hasil', $test);
+                }
+
+                // Memenuhi syarat remedial: siapkan pembuatan attempt baru
+                $attempt = null;
             }
 
-            $totalSoal = $test->questions()->count();
-            $limit = min($totalSoal, $test->jumlah_soal_tampil ?? 30);
-            $questionIds = $limit > 0
-                ? $test->questions()->inRandomOrder()->limit($limit)->pluck('id')->toArray()
-                : [];
+            // Jika belum ada attempt atau sedang memulai remedial baru
+            if (!$attempt) {
+                if (!$test->berlangsung()) {
+                    return back()->with('err', 'Tes belum dibuka atau sudah berakhir.');
+                }
 
-            $attempt = Attempt::create([
-                'test_id' => $test->id,
-                'user_id' => auth()->id(),
-                'started_at' => now(),
-                'question_ids' => $questionIds,
-            ]);
+                // Tugas 2: Guard bank soal kosong
+                $isPilgan = ($test->tipe_ujian === 'pilihan_ganda' || empty($test->tipe_ujian));
+                $availableCount = $isPilgan
+                    ? $test->questions()->where('tipe', 'pilihan_ganda')->count()
+                    : $test->questions()->count();
+
+                if ($availableCount === 0) {
+                    return redirect()->route('dashboard')->with('err', 'Soal ujian belum tersedia. Silakan hubungi dosen pengampu.');
+                }
+
+                // Pastikan tidak ada attempt aktif yang menggantung
+                $existingActive = Attempt::where('test_id', $test->id)
+                    ->where('user_id', $userId)
+                    ->whereNull('finished_at')
+                    ->first();
+
+                if ($existingActive) {
+                    $attempt = $existingActive;
+                } else {
+                    $limit = min($availableCount, $test->jumlah_soal_tampil ?? 30);
+                    $questionIds = $isPilgan
+                        ? $test->questions()->where('tipe', 'pilihan_ganda')->inRandomOrder()->limit($limit)->pluck('id')->toArray()
+                        : $test->questions()->inRandomOrder()->limit($limit)->pluck('id')->toArray();
+
+                    $attempt = Attempt::create([
+                        'test_id' => $test->id,
+                        'user_id' => $userId,
+                        'started_at' => now(),
+                        'question_ids' => $questionIds,
+                    ]);
+                }
+            }
+
+            return $attempt;
+        });
+
+        if ($result instanceof \Illuminate\Http\RedirectResponse) {
+            return $result;
         }
 
+        $attempt = $result;
         $deadline = $this->deadline($attempt, $test);
 
         if (!empty($attempt->question_ids) && is_array($attempt->question_ids)) {
@@ -118,7 +163,7 @@ class MahasiswaController extends Controller
 
         $deadline = $this->deadline($attempt, $test);
         if (now()->gt($deadline)) {
-            $attempt->update(['finished_at' => $deadline]);
+            $this->finalizeAttempt($attempt, $test, $deadline);
             return response()->json([
                 'status' => 'error',
                 'message' => 'Waktu pengerjaan ujian telah berakhir.',
@@ -158,7 +203,8 @@ class MahasiswaController extends Controller
             ->latest('id')
             ->firstOrFail();
 
-        if ($attempt->finished_at) {
+        // Idempotensi kirim: jika attempt sudah selesai, jangan dinilai ulang dan jangan menimpa nilai
+        if ($attempt->finished_at !== null) {
             return redirect()->route('mhs.hasil', $test);
         }
 
@@ -172,6 +218,7 @@ class MahasiswaController extends Controller
         $jawabanEssai = $validated['jawaban_essai'] ?? [];
 
         if (!empty($attempt->question_ids) && is_array($attempt->question_ids)) {
+            // Tugas 3: Ambil hanya soal yang MASIH ADA di database
             $questions = $test->questions()
                 ->whereIn('id', $attempt->question_ids)
                 ->get()
@@ -218,14 +265,13 @@ class MahasiswaController extends Controller
         }
 
         // Jika tipe ujian adalah essai, nilai bernilai null (status: Menunggu Penilaian)
-        // Jika pilihan ganda, nilai dihitung otomatis dengan pembagi dari jumlah question_ids (atau fallback ke count pilgan)
+        // Jika pilihan ganda, pembagi = jumlah soal yang MASIH ADA di database
         if ($test->tipe_ujian === 'essai') {
             $nilai = null;
         } else {
-            $pembagi = (!empty($attempt->question_ids) && is_array($attempt->question_ids))
-                ? count($attempt->question_ids)
-                : $pilihanGanda->count();
-
+            // Tugas 3: pembagi = jumlah soal pilgan yang MASIH ADA di database
+            // Jika 0, nilai = 0 tanpa division by zero error
+            $pembagi = $pilihanGanda->count();
             $nilai = $pembagi > 0 ? round($benar / $pembagi * 100, 2) : 0;
         }
 
@@ -254,6 +300,38 @@ class MahasiswaController extends Controller
             ->get();
 
         return view('mahasiswa.hasil', compact('test', 'attempt', 'durasiDetik', 'allAttempts'));
+    }
+
+    private function finalizeAttempt(Attempt $attempt, Test $test, Carbon $deadline): void
+    {
+        if ($test->tipe_ujian === 'essai') {
+            $nilai = null;
+        } else {
+            if (!empty($attempt->question_ids) && is_array($attempt->question_ids)) {
+                $questions = $test->questions()->whereIn('id', $attempt->question_ids)->get();
+            } else {
+                $questions = $test->questions;
+            }
+
+            $pilihanGanda = $questions->where('tipe', 'pilihan_ganda');
+            $pembagi = $pilihanGanda->count();
+            $answers = $attempt->answers()->get()->keyBy('question_id');
+            $benar = 0;
+
+            foreach ($pilihanGanda as $q) {
+                $ans = $answers->get($q->id);
+                if ($ans && $ans->jawaban !== null && $ans->jawaban === $q->jawaban_benar) {
+                    $benar++;
+                }
+            }
+
+            $nilai = $pembagi > 0 ? round($benar / $pembagi * 100, 2) : 0;
+        }
+
+        $attempt->update([
+            'finished_at' => $deadline,
+            'nilai' => $nilai,
+        ]);
     }
 
     private function deadline(Attempt $attempt, Test $test): Carbon

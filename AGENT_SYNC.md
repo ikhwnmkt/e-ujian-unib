@@ -185,6 +185,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
   - `$test` (`App\Models\Test`): Data tes.
   - `$attempts` (`Illuminate\Database\Eloquent\Collection<App\Models\Attempt>`): Seluruh riwayat pengerjaan mahasiswa beserta eager loading `user` dan `answers.question`.
     - Properti Attempt: `id`, `test_id`, `user_id`, `started_at`, `finished_at`, `nilai`, `is_passed`.
+    - *Catatan Multi-Attempt*: Saat ini mengembalikan seluruh attempt mahasiswa (muncul per attempt jika remedial). Kebijakan nilai akhir tunggal (apakah nilai tertinggi atau nilai attempt terakhir) masih menunggu konfirmasi Product Owner (PO).
 
 #### `POST|PUT /dosen/ujian/{test}/nilai/{attempt}`
 - **Route Name**: `dosen.nilai.update` (Alias URL: `/dosen/tes/{test}/nilai/{attempt}`)
@@ -261,12 +262,20 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Controller**: `MahasiswaController@mulai`
 - **Target Blade**: `resources/views/mahasiswa/ujian.blade.php`
 - **Logika & Alur**:
-  1. **Attempt Baru & Randomisasi Subset**:
+  1. **Transaksional & Anti Dobel Attempt (Idempotent)**:
+     - Dibungkus dalam `DB::transaction` dan diserialisasi per user menggunakan `User::lockForUpdate()`.
+     - Menjamin untuk satu pasangan `(test_id, user_id)` **tidak akan pernah ada lebih dari satu attempt aktif (`finished_at = null`)**. Panggilan kedua/simultan akan melanjutkan attempt aktif yang sama.
+  2. **Guard Bank Soal Kosong**:
+     - Jika jumlah soal pada bank soal tes = 0, pembuatan attempt **ditolak** dan diredirect ke dashboard dengan flash session `err`:
+       `"Soal ujian belum tersedia. Silakan hubungi dosen pengampu."`
+  3. **Auto-Finalize Attempt Kedaluwarsa (Expired)**:
+     - Jika mahasiswa kembali ke attempt yang belum selesai namun waktu pengerjaan telah habis (`now() > deadline`), sistem secara otomatis memfinalisasi attempt tersebut (`finished_at = deadline`, nilai dihitung dari jawaban tersimpan), lalu mengevaluasi kelayakan remedial.
+  4. **Attempt Baru & Randomisasi Subset**:
      - Sistem mengambil `min(totalSoal, test->jumlah_soal_tampil)` soal secara acak (`inRandomOrder()`).
      - Array ID soal disimpan di `attempt->question_ids`.
-  2. **Konsistensi Soal (Anti Re-shuffle saat Refresh)**:
+  5. **Konsistensi Soal (Anti Re-shuffle saat Refresh)**:
      - Soal di-query dan diurutkan tepat sesuai urutan di `attempt->question_ids`.
-  3. **Mekanisme Remedial**:
+  6. **Mekanisme Remedial**:
      - Jika mahasiswa sudah pernah submit ujian pilihan ganda dan nilainya di bawah KKM (`nilai < test->kkm`), dan jadwal tes masih berlangsung, halaman ini otomatis membuat **Attempt Baru** dengan himpunan acak soal yang baru.
      - Jika mahasiswa sudah lulus (`nilai >= test->kkm`) atau ujian bertipe essai, pembuatan attempt baru dicegah dan diarahkan ke halaman hasil (`mhs.hasil`).
 - **Data ke View**:
@@ -288,9 +297,10 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 #### `POST /mahasiswa/tes/{test}/kirim`
 - **Route Name**: `mhs.kirim` (Alias URL: `/mahasiswa/ujian/{test}/kirim`)
 - **Controller**: `MahasiswaController@kirim`
-- **Logika Penilaian**:
+- **Logika Penilaian & Idempotensi**:
+  - **Idempotensi**: Jika attempt sudah berstatus selesai (`finished_at !== null`), request `kirim` kedua langsung redirect ke `mhs.hasil` tanpa menilai ulang dan tanpa menimpa nilai yang sudah ada.
   - **Pilihan Ganda**:
-    - Pembagi persentase nilai dihitung berdasarkan jumlah elemen `attempt->question_ids` (fallback total soal pilihan ganda jika `question_ids` kosong).
+    - Pembagi persentase nilai dihitung berdasarkan jumlah soal dari `attempt->question_ids` yang **MASIH ADA** di database (`whereIn('id', question_ids)`). Jika ada soal yang dihapus oleh dosen di tengah ujian, pembagi otomatis menyesuaikan tanpa menimbulkan error atau division by zero.
     - Nilai tersimpan di `attempts.nilai`.
   - **Essai**:
     - `attempts.nilai` bernilai `null` (Menunggu Penilaian).

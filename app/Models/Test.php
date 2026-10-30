@@ -6,8 +6,15 @@ use Carbon\Carbon;
 
 class Test extends Model
 {
-    protected $fillable = ['dosen_id','judul','tanggal','jam_mulai','jam_selesai','durasi','sifat','tipe_ujian'];
-    protected $casts = ['tanggal' => 'date'];
+    protected $fillable = [
+        'dosen_id', 'judul', 'materi', 'tanggal', 'jam_mulai', 'jam_selesai',
+        'durasi', 'sifat', 'tipe_ujian', 'jumlah_soal_tampil', 'kkm',
+    ];
+    protected $casts = [
+        'tanggal' => 'date',
+        'jumlah_soal_tampil' => 'integer',
+        'kkm' => 'integer',
+    ];
 
     public function dosen() { return $this->belongsTo(User::class, 'dosen_id'); }
     public function questions() { return $this->hasMany(Question::class); }

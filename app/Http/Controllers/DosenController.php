@@ -18,12 +18,15 @@ class DosenController extends Controller
     {
         return [
             'judul' => 'required|string|max:255',
+            'materi' => 'nullable|string|max:255',
             'tipe_ujian' => 'nullable|in:pilihan_ganda,essai',
             'tanggal' => 'required|date',
             'jam_mulai' => 'required|date_format:H:i',
             'jam_selesai' => 'required|date_format:H:i|after:jam_mulai',
             'durasi' => 'required|integer|min:1|max:600',
             'sifat' => 'required|in:fleksibel,ketat',
+            'jumlah_soal_tampil' => 'nullable|integer|min:1|max:1000',
+            'kkm' => 'nullable|integer|min:0|max:100',
         ];
     }
 
@@ -36,12 +39,25 @@ class DosenController extends Controller
         ]);
     }
 
-    public function create() { return view('dosen.form', ['test' => new Test(['durasi' => 90, 'sifat' => 'fleksibel', 'tipe_ujian' => 'pilihan_ganda'])]); }
+    public function create()
+    {
+        return view('dosen.form', [
+            'test' => new Test([
+                'durasi' => 90,
+                'sifat' => 'fleksibel',
+                'tipe_ujian' => 'pilihan_ganda',
+                'jumlah_soal_tampil' => 30,
+                'kkm' => 70,
+            ]),
+        ]);
+    }
 
     public function store(Request $r)
     {
         $data = $r->validate($this->rules());
         $data['tipe_ujian'] = $data['tipe_ujian'] ?? 'pilihan_ganda';
+        $data['jumlah_soal_tampil'] = $data['jumlah_soal_tampil'] ?? 30;
+        $data['kkm'] = $data['kkm'] ?? 70;
         $test = auth()->user()->tests()->create($data);
         return redirect()->route('dosen.soal', $test)->with('ok', 'Tes dibuat. Silakan tambahkan soal.');
     }
@@ -167,6 +183,7 @@ class DosenController extends Controller
                     'finished_at' => $attempt->finished_at?->toIso8601String(),
                     'is_finished' => !is_null($attempt->finished_at),
                     'nilai' => $attempt->nilai !== null ? (float) $attempt->nilai : null,
+                    'is_passed' => $attempt->isPassed(),
                     'updated_at' => $lastActivity?->toIso8601String(),
                     'answers' => $attempt->answers->map(function ($ans) {
                         return [
@@ -186,7 +203,10 @@ class DosenController extends Controller
             'test' => [
                 'id' => $test->id,
                 'judul' => $test->judul,
+                'materi' => $test->materi,
                 'tipe_ujian' => $test->tipe_ujian,
+                'kkm' => $test->kkm ?? 70,
+                'jumlah_soal_tampil' => $test->jumlah_soal_tampil ?? 30,
             ],
             'server_time' => now()->toIso8601String(),
             'attempts' => $attempts,

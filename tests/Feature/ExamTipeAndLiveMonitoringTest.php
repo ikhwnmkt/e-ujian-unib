@@ -267,4 +267,182 @@ class ExamTipeAndLiveMonitoringTest extends TestCase
         $attempt->refresh();
         $this->assertEquals(88.5, (float) $attempt->nilai);
     }
+
+    public function test_randomization_subset_questions_with_jumlah_soal_tampil(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Subset Pilgan',
+            'materi' => 'Struktur Data',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 4,
+            'kkm' => 70,
+        ]);
+
+        // Buat 10 soal di bank soal
+        $questions = [];
+        for ($i = 1; $i <= 10; $i++) {
+            $questions[] = Question::create([
+                'test_id' => $test->id,
+                'tipe' => 'pilihan_ganda',
+                'pertanyaan' => "Soal nomor {$i}",
+                'opsi_a' => 'A',
+                'opsi_b' => 'B',
+                'opsi_c' => 'C',
+                'opsi_d' => 'D',
+                'jawaban_benar' => 'a',
+            ]);
+        }
+
+        // Mahasiswa memulai ujian
+        $response = $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $response->assertOk();
+
+        $attempt = Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->first();
+        $this->assertNotNull($attempt);
+        $this->assertCount(4, $attempt->question_ids);
+
+        // Refresh halaman: pastikan soal tidak ter-acak ulang
+        $responseRefresh = $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $responseRefresh->assertOk();
+        $attempt->refresh();
+        $this->assertCount(4, $attempt->question_ids);
+
+        // Jawab 3 benar, 1 salah
+        $firstThree = array_slice($attempt->question_ids, 0, 3);
+        $lastOne = array_slice($attempt->question_ids, 3, 1)[0];
+
+        $jawaban = [];
+        foreach ($firstThree as $qid) {
+            $jawaban[$qid] = 'a'; // benar
+        }
+        $jawaban[$lastOne] = 'b'; // salah
+
+        $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $test), [
+            'jawaban' => $jawaban,
+        ]);
+
+        $attempt->refresh();
+        // 3 dari 4 soal benar = 75.0
+        $this->assertEquals(75.0, (float) $attempt->nilai);
+        $this->assertTrue($attempt->isPassed());
+    }
+
+    public function test_remedial_flow_when_score_below_kkm(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Remedial Test',
+            'materi' => 'Matematika Diskrit',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 75,
+        ]);
+
+        $q1 = Question::create([
+            'test_id' => $test->id,
+            'tipe' => 'pilihan_ganda',
+            'pertanyaan' => '2 x 2 = ?',
+            'opsi_a' => '4', 'opsi_b' => '5', 'opsi_c' => '6', 'opsi_d' => '7',
+            'jawaban_benar' => 'a',
+        ]);
+        $q2 = Question::create([
+            'test_id' => $test->id,
+            'tipe' => 'pilihan_ganda',
+            'pertanyaan' => '3 x 3 = ?',
+            'opsi_a' => '9', 'opsi_b' => '10', 'opsi_c' => '11', 'opsi_d' => '12',
+            'jawaban_benar' => 'a',
+        ]);
+
+        // Attempt 1: Mahasiswa ikut ujian
+        $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $attempt1 = Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->latest('id')->first();
+
+        // Submit 1 benar 1 salah = nilai 50.0 (< KKM 75)
+        $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $test), [
+            'jawaban' => [
+                $q1->id => 'a',
+                $q2->id => 'b',
+            ],
+        ]);
+
+        $attempt1->refresh();
+        $this->assertEquals(50.0, (float) $attempt1->nilai);
+        $this->assertFalse($attempt1->isPassed());
+        $this->assertTrue($attempt1->canRemedial());
+
+        // Mahasiswa mengulang ujian (Remedial) saat jadwal masih berlangsung
+        $responseRemedial = $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $responseRemedial->assertOk();
+
+        $attempt2 = Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->latest('id')->first();
+        $this->assertNotEquals($attempt1->id, $attempt2->id);
+        $this->assertNull($attempt2->finished_at);
+
+        // Submit Attempt 2 dengan jawaban benar semua = 100.0 (>= KKM 75)
+        $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $test), [
+            'jawaban' => [
+                $q1->id => 'a',
+                $q2->id => 'a',
+            ],
+        ]);
+
+        $attempt2->refresh();
+        $this->assertEquals(100.0, (float) $attempt2->nilai);
+        $this->assertTrue($attempt2->isPassed());
+        $this->assertFalse($attempt2->canRemedial());
+
+        // Jika mahasiswa mencoba akses mulai lagi setelah lulus, diarahkan ke hasil (tidak boleh buat attempt ke-3)
+        $responseAfterPass = $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $responseAfterPass->assertRedirect(route('mhs.hasil', $test));
+
+        $totalAttempts = Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->count();
+        $this->assertEquals(2, $totalAttempts);
+    }
+
+    public function test_essai_cannot_remedial(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Essai No Remedial',
+            'materi' => 'Filsafat Ilmu',
+            'tipe_ujian' => 'essai',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'kkm' => 70,
+        ]);
+
+        $q = Question::create([
+            'test_id' => $test->id,
+            'tipe' => 'essai',
+            'pertanyaan' => 'Jelaskan epistemologi!',
+        ]);
+
+        $attempt = Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $this->mahasiswa->id,
+            'started_at' => now(),
+            'finished_at' => now(),
+            'nilai' => 40.0, // di bawah KKM tapi tipe essai
+        ]);
+
+        // Essai tidak boleh remedial, harus langsung redirect ke hasil
+        $response = $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $response->assertRedirect(route('mhs.hasil', $test));
+
+        $this->assertEquals(1, Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->count());
+    }
 }

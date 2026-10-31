@@ -360,4 +360,221 @@ class ExamEdgeCasesAndConcurrencyTest extends TestCase
         $this->assertEquals(2, $adminTest->attempts->first()->attempt_count);
         $this->assertEquals(100.0, (float) $adminTest->attempts->first()->best_score);
     }
+
+    public function test_essai_expired_attempt_is_finalized_with_null_score_and_no_remedial(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Essai Expired',
+            'tipe_ujian' => 'essai',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        $q = Question::create([
+            'test_id' => $test->id,
+            'tipe' => 'essai',
+            'pertanyaan' => 'Soal Essai 1',
+        ]);
+
+        // Attempt dimulai 2 jam lalu (sudah lewat durasi 60 menit)
+        $expiredAttempt = Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $this->mahasiswa->id,
+            'started_at' => now()->subHours(2),
+            'finished_at' => null,
+            'question_ids' => [$q->id],
+        ]);
+
+        // Mahasiswa mengakses mulai
+        $response = $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+
+        // Karena essai tidak boleh remedial, langsung redirect ke hasil
+        $response->assertRedirect(route('mhs.hasil', $test));
+
+        $expiredAttempt->refresh();
+        $this->assertNotNull($expiredAttempt->finished_at);
+        $this->assertNull($expiredAttempt->nilai); // Nilai WAJIB null (Menunggu Penilaian)
+
+        // Tidak boleh ada attempt baru
+        $this->assertEquals(1, Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->count());
+    }
+
+    public function test_kirim_within_grace_period_is_graded_normally_from_payload(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Grace Period In',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        $q1 = Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q1', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+        $q2 = Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q2', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'b']);
+
+        // Attempt dimulai 60 menit + 30 detik lalu (lewat deadline 30 detik, tapi masih dalam grace 60s)
+        $attempt = Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $this->mahasiswa->id,
+            'started_at' => now()->subMinutes(60)->subSeconds(30),
+            'finished_at' => null,
+            'question_ids' => [$q1->id, $q2->id],
+        ]);
+
+        // Kirim payload dengan jawaban benar semua
+        $response = $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $test), [
+            'jawaban' => [
+                $q1->id => 'a',
+                $q2->id => 'b',
+            ],
+        ]);
+
+        $response->assertRedirect(route('mhs.hasil', $test));
+
+        $attempt->refresh();
+        $this->assertNotNull($attempt->finished_at);
+        // Tetap dinilai dari payload request -> nilai 100.0
+        $this->assertEquals(100.0, (float) $attempt->nilai);
+    }
+
+    public function test_kirim_after_grace_period_ignores_payload_and_finalizes_from_db(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Grace Period Out',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        $q1 = Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q1', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+        $q2 = Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q2', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'b']);
+
+        // Attempt dimulai 60 menit + 90 detik lalu (lewat grace period 60 detik)
+        $attempt = Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $this->mahasiswa->id,
+            'started_at' => now()->subMinutes(60)->subSeconds(90),
+            'finished_at' => null,
+            'question_ids' => [$q1->id, $q2->id],
+        ]);
+
+        // Di DB sebelumnya tersimpan jawaban q1 benar via auto-save
+        Answer::create([
+            'attempt_id' => $attempt->id,
+            'question_id' => $q1->id,
+            'jawaban' => 'a',
+            'benar' => true,
+        ]);
+
+        // Mahasiswa mencoba mengirim payload baru terlambat
+        $response = $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $test), [
+            'jawaban' => [
+                $q1->id => 'b', // mencoba jawaban salah di payload baru
+                $q2->id => 'b',
+            ],
+        ]);
+
+        $response->assertRedirect(route('mhs.hasil', $test));
+        $response->assertSessionHas('err', 'Waktu ujian telah habis.');
+
+        $attempt->refresh();
+        $this->assertNotNull($attempt->finished_at);
+        // Nilai dihitung dari DB (q1 benar, q2 kosong -> 1 dari 2 = 50.0)
+        $this->assertEquals(50.0, (float) $attempt->nilai);
+    }
+
+    public function test_autosave_on_expired_attempt_returns_409_conflict_and_finalizes(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Autosave Expired Check',
+            'tipe_ujian' => 'essai',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        $q = Question::create([
+            'test_id' => $test->id,
+            'tipe' => 'essai',
+            'pertanyaan' => 'Soal Essai Autosave',
+        ]);
+
+        $attempt = Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $this->mahasiswa->id,
+            'started_at' => now()->subHours(2),
+            'finished_at' => null,
+            'question_ids' => [$q->id],
+        ]);
+
+        $response = $this->actingAs($this->mahasiswa)->postJson('/mahasiswa/ujian/' . $test->id . '/autosave', [
+            'question_id' => $q->id,
+            'jawaban_essai' => 'Ketikan setelah waktu habis...',
+        ]);
+
+        $response->assertStatus(409)
+            ->assertJson([
+                'expired' => true,
+                'message' => 'Waktu ujian telah habis.',
+                'redirect' => route('mhs.hasil', $test),
+            ]);
+
+        $attempt->refresh();
+        $this->assertNotNull($attempt->finished_at);
+        $this->assertNull($attempt->nilai);
+    }
+
+    public function test_dosen_cannot_manually_update_grade_for_pilihan_ganda_exam(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Pilgan Manual Grade Blocked',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        $attempt = Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $this->mahasiswa->id,
+            'started_at' => now(),
+            'finished_at' => now(),
+            'nilai' => 70.0,
+        ]);
+
+        // Dosen mencoba mengubah nilai ujian pilihan ganda secara manual
+        $response = $this->actingAs($this->dosen)->postJson('/dosen/ujian/' . $test->id . '/nilai/' . $attempt->id, [
+            'nilai' => 95.0,
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'status' => 'error',
+                'message' => 'Penilaian manual hanya diizinkan untuk ujian bertipe essai.',
+            ]);
+
+        $attempt->refresh();
+        $this->assertEquals(70.0, (float) $attempt->nilai);
+    }
 }

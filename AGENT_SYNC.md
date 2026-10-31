@@ -197,6 +197,8 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Route Name**: `dosen.nilai.update` (Alias URL: `/dosen/tes/{test}/nilai/{attempt}`)
 - **Controller**: `DosenController@updateNilai`
 - **Kegunaan**: Dosen menginput atau memperbarui nilai ujian essai mahasiswa.
+- **Guard Tipe Ujian**: Penilaian manual **HANYA diizinkan untuk ujian bertipe `essai`**. Jika dipanggil pada ujian pilihan ganda, request ditolak dengan **HTTP 422 Unprocessable Content**:
+  `{ "status": "error", "message": "Penilaian manual hanya diizinkan untuk ujian bertipe essai." }`
 - **Request Form / JSON**:
   - `nilai`: `required|numeric|min:0|max:100`
 - **Response**:
@@ -301,18 +303,35 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Request Payload JSON**:
   - `question_id`: `required|exists:questions,id`
   - `jawaban_essai`: `nullable|string|max:65535`
-- **Response JSON**: `{ "status": "saved", "updated_at": "2026-10-31T00:44:12.000000Z" }`
+- **Response**:
+  - **Status Normal (HTTP 200 OK)**:
+    ```json
+    { "status": "saved", "updated_at": "2026-10-31T00:44:12.000000Z" }
+    ```
+  - **Status Kedaluwarsa / Selesai (HTTP 409 Conflict)**:
+    Jika attempt sudah `finished_at !== null` atau waktu ujian telah habis (`now() > deadline`), attempt otomatis difinalisasi via `finalizeAttempt()` dan mengembalikan response 409 agar frontend mahasiswa menghentikan autosave timer dan me-redirect browser:
+    ```json
+    {
+      "expired": true,
+      "message": "Waktu ujian telah habis.",
+      "redirect": "http://domain.test/mahasiswa/tes/1/hasil"
+    }
+    ```
 
 #### `POST /mahasiswa/tes/{test}/kirim`
 - **Route Name**: `mhs.kirim` (Alias URL: `/mahasiswa/ujian/{test}/kirim`)
 - **Controller**: `MahasiswaController@kirim`
+- **Toleransi Keterlambatan (Grace Period 60 Detik)**:
+  - Menggunakan konfigurasi `config('exam.submit_grace_seconds', 60)` (default 60 detik).
+  - **Di dalam masa grace period (`now() <= deadline + 60s`)**: Request pengerjaan diterima dan dievaluasi secara normal dari payload form yang dikirim mahasiswa.
+  - **Setelah lewat grace period (`now() > deadline + 60s`)**: Payload jawaban baru dari form request diabaikan, sistem memanggil `finalizeAttempt()` (menghitung nilai dari jawaban yang sudah tersimpan di database untuk pilgan, atau `null` untuk essai), lalu redirect ke `mhs.hasil` dengan flash session `err`: `"Waktu ujian telah habis."`.
 - **Logika Penilaian & Idempotensi**:
   - **Idempotensi**: Jika attempt sudah berstatus selesai (`finished_at !== null`), request `kirim` kedua langsung redirect ke `mhs.hasil` tanpa menilai ulang dan tanpa menimpa nilai yang sudah ada.
   - **Pilihan Ganda**:
     - Pembagi persentase nilai dihitung berdasarkan jumlah soal dari `attempt->question_ids` yang **MASIH ADA** di database (`whereIn('id', question_ids)`). Jika ada soal yang dihapus oleh dosen di tengah ujian, pembagi otomatis menyesuaikan tanpa menimbulkan error atau division by zero.
     - Nilai tersimpan di `attempts.nilai`.
   - **Essai**:
-    - `attempts.nilai` bernilai `null` (Menunggu Penilaian).
+    - `attempts.nilai` bernilai `null` (Menunggu Penilaian). Kolom `nilai` tidak pernah dihitung angka secara otomatis pada alur finalisasi ujian essai.
 - **Form Submission**:
   - `jawaban`: `nullable|array` (Key: `question_id`, Value: `a`|`b`|`c`|`d`)
   - `jawaban.*`: `nullable|in:a,b,c,d`

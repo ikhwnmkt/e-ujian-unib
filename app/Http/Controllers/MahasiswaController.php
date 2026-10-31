@@ -55,6 +55,7 @@ class MahasiswaController extends Controller
                 $deadline = $this->deadline($attempt, $test);
                 if (now()->gt($deadline)) {
                     $this->finalizeAttempt($attempt, $test, $deadline);
+                    $attempt->refresh();
                 }
             }
 
@@ -154,20 +155,18 @@ class MahasiswaController extends Controller
             ], 404);
         }
 
-        if ($attempt->finished_at) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Ujian telah selesai diserahkan.',
-            ], 403);
-        }
-
         $deadline = $this->deadline($attempt, $test);
-        if (now()->gt($deadline)) {
-            $this->finalizeAttempt($attempt, $test, $deadline);
+
+        if ($attempt->finished_at !== null || now()->gt($deadline)) {
+            if ($attempt->finished_at === null) {
+                $this->finalizeAttempt($attempt, $test, $deadline);
+            }
+
             return response()->json([
-                'status' => 'error',
-                'message' => 'Waktu pengerjaan ujian telah berakhir.',
-            ], 403);
+                'expired' => true,
+                'message' => 'Waktu ujian telah habis.',
+                'redirect' => route('mhs.hasil', $test),
+            ], 409);
         }
 
         $validated = $r->validate([
@@ -206,6 +205,16 @@ class MahasiswaController extends Controller
         // Idempotensi kirim: jika attempt sudah selesai, jangan dinilai ulang dan jangan menimpa nilai
         if ($attempt->finished_at !== null) {
             return redirect()->route('mhs.hasil', $test);
+        }
+
+        $deadline = $this->deadline($attempt, $test);
+        $graceSeconds = (int) config('exam.submit_grace_seconds', 60);
+        $deadlineWithGrace = $deadline->copy()->addSeconds($graceSeconds);
+
+        if (now()->gt($deadlineWithGrace)) {
+            // Lewat batas toleransi (grace period): abaikan payload baru, finalize dari DB
+            $this->finalizeAttempt($attempt, $test, $deadline);
+            return redirect()->route('mhs.hasil', $test)->with('err', 'Waktu ujian telah habis.');
         }
 
         $validated = $r->validate([

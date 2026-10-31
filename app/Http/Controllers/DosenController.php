@@ -135,6 +135,16 @@ class DosenController extends Controller
         $test = $this->own($test);
         abort_unless($attempt->test_id === $test->id, 404);
 
+        if ($test->tipe_ujian === 'pilihan_ganda' || empty($test->tipe_ujian)) {
+            if ($r->expectsJson() || $r->wantsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Penilaian manual hanya diizinkan untuk ujian bertipe essai.',
+                ], 422);
+            }
+            return back()->with('err', 'Penilaian manual hanya diizinkan untuk ujian bertipe essai.');
+        }
+
         $data = $r->validate([
             'nilai' => 'required|numeric|min:0|max:100',
         ]);

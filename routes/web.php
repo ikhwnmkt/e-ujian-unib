@@ -10,6 +10,9 @@ Route::middleware('guest')->group(function () {
     Route::post('/daftar', [AuthController::class, 'register']);
     Route::get('/auth/google', [AuthController::class, 'googleRedirect'])->name('google');
     Route::get('/auth/google/callback', [AuthController::class, 'googleCallback']);
+    Route::get('/auth/google/otp', [AuthController::class, 'showGoogleOtp'])->name('google.otp');
+    Route::post('/auth/google/otp', [AuthController::class, 'verifyGoogleOtp'])->middleware('throttle:5,1')->name('google.otp.verify');
+    Route::post('/auth/google/otp/kirim-ulang', [AuthController::class, 'resendGoogleOtp'])->middleware('throttle:1,1')->name('google.otp.resend');
 });
 
 Route::middleware('auth')->group(function () {

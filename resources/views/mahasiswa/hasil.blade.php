@@ -2,7 +2,7 @@
 @section('title','Hasil Tes')
 @section('content')
 <div class="container">
-  <div class="row"><h2>Hasil: {{ $test->judul }}</h2><a href="{{ route('mhs.index') }}" class="btn btn-gray">Kembali</a></div><hr>
+  <div class="page-heading"><a href="{{ route('mhs.index') }}" class="back-button" aria-label="Kembali" title="Kembali"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a><h2>Hasil: {{ $test->judul }}</h2></div><hr>
   <div class="panel" style="text-align:center"><div>Nilai pilihan ganda</div><div style="font-size:48px;font-weight:700;color:#3182e0">@if($attempt->nilai !== null){{ (float)$attempt->nilai }}@else &mdash; @endif</div>
     @if($attempt->nilai === null)<div>Tidak ada soal pilihan ganda pada ujian ini.</div>@endif
   </div>

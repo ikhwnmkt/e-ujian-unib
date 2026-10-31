@@ -577,4 +577,96 @@ class ExamEdgeCasesAndConcurrencyTest extends TestCase
         $attempt->refresh();
         $this->assertEquals(70.0, (float) $attempt->nilai);
     }
+
+    public function test_pilihan_ganda_autosave_calculates_score_accurately_on_finalize_after_timeout(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Pilgan AutoSave Check',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        $q1 = Question::create([
+            'test_id' => $test->id,
+            'tipe' => 'pilihan_ganda',
+            'pertanyaan' => 'Soal 1 Pilgan',
+            'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D',
+            'jawaban_benar' => 'a',
+        ]);
+
+        $q2 = Question::create([
+            'test_id' => $test->id,
+            'tipe' => 'pilihan_ganda',
+            'pertanyaan' => 'Soal 2 Pilgan',
+            'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D',
+            'jawaban_benar' => 'b',
+        ]);
+
+        // Mahasiswa memulai ujian
+        $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $attempt = Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->latest('id')->first();
+        $this->assertNotNull($attempt);
+
+        // Mahasiswa autosave soal 1 dengan pilihan 'a' (benar)
+        $res1 = $this->actingAs($this->mahasiswa)->postJson('/mahasiswa/ujian/' . $test->id . '/autosave', [
+            'question_id' => $q1->id,
+            'pilihan' => 'a',
+        ]);
+        $res1->assertOk()->assertJson(['status' => 'saved']);
+
+        // Mahasiswa autosave soal 2 dengan pilihan 'b' (benar)
+        $res2 = $this->actingAs($this->mahasiswa)->postJson('/mahasiswa/ujian/' . $test->id . '/autosave', [
+            'question_id' => $q2->id,
+            'pilihan' => 'b',
+        ]);
+        $res2->assertOk()->assertJson(['status' => 'saved']);
+
+        // Pastikan jawaban tersimpan di database
+        $ans1 = Answer::where('attempt_id', $attempt->id)->where('question_id', $q1->id)->first();
+        $ans2 = Answer::where('attempt_id', $attempt->id)->where('question_id', $q2->id)->first();
+        $this->assertEquals('a', $ans1->jawaban);
+        $this->assertTrue((bool) $ans1->benar);
+        $this->assertEquals('b', $ans2->jawaban);
+        $this->assertTrue((bool) $ans2->benar);
+
+        // Waktu habis: melompat melewati durasi + grace period tanpa mahasiswa menekan tombol kirim
+        $this->travel(60)->minutes();
+        $this->travel(70)->seconds();
+
+        // Mahasiswa mengakses halaman tes (mhs.mulai), memicu auto-finalize
+        $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+
+        $attempt->refresh();
+        $this->assertNotNull($attempt->finished_at);
+        // Nilai dihitung akurat dari jawaban tersimpan (2 benar dari 2 soal = 100.0), bukan 0!
+        $this->assertEquals(100.0, (float) $attempt->nilai);
+        $this->assertTrue($attempt->isPassed());
+    }
+
+    public function test_remedial_route_redirects_to_mulai(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Remedial Route Test',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        $response = $this->actingAs($this->mahasiswa)->get(route('mhs.remedial', $test));
+        $response->assertRedirect(route('mhs.mulai', $test));
+
+        $responsePost = $this->actingAs($this->mahasiswa)->post(route('mhs.remedial', $test));
+        $responsePost->assertRedirect(route('mhs.mulai', $test));
+    }
 }

@@ -42,6 +42,8 @@ Route::middleware('auth')->group(function () {
     Route::prefix('mahasiswa')->name('mhs.')->middleware(RoleMiddleware::class . ':mahasiswa')->group(function () {
         Route::get('/', [MahasiswaController::class, 'index'])->name('index');
         Route::get('/tes/{test}/mulai', [MahasiswaController::class, 'mulai'])->name('mulai');
+        Route::match(['get', 'post'], '/tes/{test}/remedial', [MahasiswaController::class, 'remedial'])->name('remedial');
+        Route::match(['get', 'post'], '/ujian/{test}/remedial', [MahasiswaController::class, 'remedial']);
         Route::post('/ujian/{test}/autosave', [MahasiswaController::class, 'autosave'])->name('autosave');
         Route::post('/tes/{test}/autosave', [MahasiswaController::class, 'autosave']);
         Route::post('/tes/{test}/kirim', [MahasiswaController::class, 'kirim'])->name('kirim');

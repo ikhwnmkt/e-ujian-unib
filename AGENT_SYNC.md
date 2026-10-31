@@ -294,15 +294,25 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
   - `$questions` (`Illuminate\Support\Collection<App\Models\Question>`): Soal subset yang terkunci pada attempt ini.
   - `$sisaDetik` (`int`): Sisa durasi ujian dalam detik.
 
+#### `POST|GET /mahasiswa/tes/{test}/remedial`
+- **Route Name**: `mhs.remedial` (Alias URL: `/mahasiswa/ujian/{test}/remedial`)
+- **Controller**: `MahasiswaController@remedial`
+- **Kegunaan**: Endpoint eksplisit untuk tombol "Ulangi Ujian" / "Mulai Remedial" di frontend (dapat diakses via POST form maupun link GET). Me-redirect ke `route('mhs.mulai', $test)`. Frontend bebas memakai `<a href="{{ route('mhs.mulai', $test) }}">` ataupun form submit `route('mhs.remedial', $test)`.
+
 #### `POST /mahasiswa/ujian/{test}/autosave`
 - **Route Name**: `mhs.autosave` (Alias URL: `/mahasiswa/tes/{test}/autosave`)
 - **Controller**: `MahasiswaController@autosave`
+- **Kegunaan**:
+  - **Pilihan Ganda**: Menyimpan pilihan radio button (A/B/C/D) secara instan saat opsi diklik mahasiswa, sekaligus menghitung status kebenaran (`benar`) di DB. Jika waktu ujian habis tanpa menekan tombol "Kirim", nilai akhir dihitung dari data yang tersimpan di DB ini (`finalizeAttempt`).
+  - **Essai**: Menyimpan ketikan jawaban essai secara live untuk monitoring dosen.
 - **Request Headers**:
   - `Content-Type: application/json`
   - `X-CSRF-TOKEN`: nilai token CSRF
 - **Request Payload JSON**:
   - `question_id`: `required|exists:questions,id`
-  - `jawaban_essai`: `nullable|string|max:65535`
+  - `pilihan`: `nullable|in:a,b,c,d` *(Baru - untuk Pilihan Ganda)*
+  - `jawaban`: `nullable|in:a,b,c,d` *(Alias untuk `pilihan`)*
+  - `jawaban_essai`: `nullable|string|max:65535` *(Untuk Essai)*
 - **Response**:
   - **Status Normal (HTTP 200 OK)**:
     ```json

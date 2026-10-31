@@ -171,20 +171,41 @@ class MahasiswaController extends Controller
 
         $validated = $r->validate([
             'question_id' => 'required|exists:questions,id',
+            'pilihan' => 'nullable|in:a,b,c,d',
+            'jawaban' => 'nullable|in:a,b,c,d',
             'jawaban_essai' => 'nullable|string|max:65535',
         ]);
 
         $question = $test->questions()->where('id', $validated['question_id'])->firstOrFail();
+
+        $pilihan = $validated['pilihan'] ?? $validated['jawaban'] ?? null;
+        $isPilgan = ($test->tipe_ujian === 'pilihan_ganda' || empty($test->tipe_ujian));
+
+        $attributes = [];
+
+        if ($isPilgan && $pilihan !== null) {
+            $isBenar = (strtolower($pilihan) === strtolower($question->jawaban_benar));
+            $attributes['jawaban'] = $pilihan;
+            $attributes['benar'] = $isBenar;
+        } elseif (!$isPilgan && array_key_exists('jawaban_essai', $validated)) {
+            $attributes['jawaban_essai'] = $validated['jawaban_essai'] ?? '';
+            $attributes['benar'] = false;
+        } else {
+            if ($pilihan !== null) {
+                $attributes['jawaban'] = $pilihan;
+                $attributes['benar'] = (strtolower($pilihan) === strtolower($question->jawaban_benar));
+            }
+            if (array_key_exists('jawaban_essai', $validated)) {
+                $attributes['jawaban_essai'] = $validated['jawaban_essai'] ?? '';
+            }
+        }
 
         $answer = Answer::updateOrCreate(
             [
                 'attempt_id' => $attempt->id,
                 'question_id' => $question->id,
             ],
-            [
-                'jawaban_essai' => $validated['jawaban_essai'] ?? '',
-                'benar' => false,
-            ]
+            $attributes
         );
 
         $attempt->touch();
@@ -193,6 +214,11 @@ class MahasiswaController extends Controller
             'status' => 'saved',
             'updated_at' => $answer->updated_at->toIso8601String(),
         ]);
+    }
+
+    public function remedial(Request $r, Test $test)
+    {
+        return redirect()->route('mhs.mulai', $test);
     }
 
     public function kirim(Request $r, Test $test)

@@ -37,6 +37,10 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
   - `email`: `required|email`
   - `password`: `required`
   - `remember`: `boolean (optional)`
+  - **Proteksi Single Active Device & Lock Ujian Aktif**:
+    - **Mahasiswa Sedang Ujian**: Jika akun mahasiswa terdeteksi sedang memiliki sesi ujian aktif yang belum diserahkan (`Attempt::finished_at == null`) pada jadwal tes yang sedang berlangsung, upaya login dari perangkat/browser lain **DITOLAK** dengan pesan error:
+      `"Akun Anda sedang aktif mengikuti ujian di perangkat lain. Dilarang login multi-device selama ujian berlangsung."`
+    - **Kebijakan Single Active Device (Semua Role)**: Setiap kali login baru berhasil, sesi lama milik akun tersebut di perangkat lain otomatis dibatalkan/dihapus dari tabel `sessions`.
 
 #### `GET /daftar`
 - **Route Name**: `register`
@@ -208,7 +212,10 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 #### `GET /dosen/ujian/{test}/live-monitoring`
 - **Route Name**: `dosen.live-monitoring` (Alias URL: `/dosen/tes/{test}/live-monitoring`)
 - **Controller**: `DosenController@liveMonitoring`
-- **Kegunaan**: Polling AJAX near real-time oleh frontend dosen untuk memantau ketikan jawaban essai mahasiswa.
+- **Target Blade**: `resources/views/dosen/live-monitoring.blade.php` (Jika diakses via browser HTML biasa)
+- **Kegunaan**:
+  - **Akses Browser (HTML)**: Dosen langsung disajikan halaman visual Live Monitoring dengan dashboard realtime, counter peserta, dan polling otomatis setiap 3 detik.
+  - **Akses AJAX/JSON**: Mengembalikan payload JSON near real-time untuk komponen frontend / polling JavaScript.
 - **Deduplikasi**: Mahasiswa yang remedial **hanya muncul 1 kali** (mengambil attempt paling mutakhir / `latest('id')`), dengan penanda `attempt_count`.
 - **Response JSON**:
   ```json

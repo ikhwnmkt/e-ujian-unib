@@ -10,9 +10,10 @@
     <div class="card"><div class="body"><b>{{ $t->judul }}</b>
       Mulai : {{ $t->tanggal_indo }}<br>Waktu : {{ $t->waktu }}<br>Durasi : {{ $t->durasi }} Menit<br>Sifat : {{ ucfirst($t->sifat) }}</div>
       <div class="foot">
-        <a href="{{ route('dosen.soal',$t) }}" class="btn btn-gray">Soal</a>
-        <a href="{{ route('dosen.edit',$t) }}" class="btn btn-blue">Edit</a>
-        <form method="POST" action="{{ route('dosen.destroy',$t) }}" onsubmit="return confirm('Hapus tes ini?')">@csrf @method('DELETE')<button class="btn btn-red">Hapus</button></form>
+        <a href="{{ route('dosen.live-monitoring', $t) }}" class="btn btn-green">Live Monitoring</a>
+        <a href="{{ route('dosen.soal', $t) }}" class="btn btn-gray">Soal</a>
+        <a href="{{ route('dosen.edit', $t) }}" class="btn btn-blue">Edit</a>
+        <form method="POST" action="{{ route('dosen.destroy', $t) }}" onsubmit="return confirm('Hapus tes ini?')">@csrf @method('DELETE')<button class="btn btn-red">Hapus</button></form>
       </div></div>
     @empty <p>Belum ada tes.</p> @endforelse
   </div>
@@ -21,7 +22,10 @@
     @forelse($riwayat as $t)
     <div class="card"><div class="body"><b>{{ $t->judul }}</b>
       Mulai : {{ $t->tanggal_indo }}<br>Waktu : {{ $t->waktu }}<br>Durasi : {{ $t->durasi }} Menit<br>Sifat : {{ ucfirst($t->sifat) }}</div>
-      <div class="foot"><a href="{{ route('dosen.nilai',$t) }}" class="btn btn-blue">Lihat Nilai</a></div></div>
+      <div class="foot">
+        <a href="{{ route('dosen.nilai', $t) }}" class="btn btn-blue">Lihat Nilai</a>
+        <a href="{{ route('dosen.live-monitoring', $t) }}" class="btn btn-gray">Monitoring</a>
+      </div></div>
     @empty <p>Belum ada riwayat.</p> @endforelse
   </div>
 </div>

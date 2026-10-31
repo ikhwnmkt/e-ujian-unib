@@ -669,4 +669,82 @@ class ExamEdgeCasesAndConcurrencyTest extends TestCase
         $responsePost = $this->actingAs($this->mahasiswa)->post(route('mhs.remedial', $test));
         $responsePost->assertRedirect(route('mhs.mulai', $test));
     }
+
+    public function test_multi_device_login_is_blocked_when_student_has_active_exam(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Active Lock Test',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        // Sesi aktif di Device 1
+        \Illuminate\Support\Facades\DB::table('sessions')->insert([
+            'id' => 'device-1-session-token',
+            'user_id' => $this->mahasiswa->id,
+            'ip_address' => '127.0.0.1',
+            'user_agent' => 'Device 1 Browser',
+            'payload' => 'dummy',
+            'last_activity' => now()->timestamp,
+        ]);
+
+        // Mahasiswa sedang mengerjakan ujian (attempt aktif belum selesai)
+        Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $this->mahasiswa->id,
+            'started_at' => now(),
+            'finished_at' => null,
+        ]);
+
+        // Coba login dari Device 2 dengan akun yang sama
+        $response = $this->post('/login', [
+            'email' => $this->mahasiswa->email,
+            'password' => 'password',
+        ]);
+
+        // Login ditolak dengan error multi device
+        $response->assertSessionHasErrors('email');
+        $this->assertGuest();
+
+        // Setelah ujian selesai:
+        Attempt::where('user_id', $this->mahasiswa->id)->update(['finished_at' => now()]);
+
+        // Coba login lagi dari Device 2
+        $responseSuccess = $this->post('/login', [
+            'email' => $this->mahasiswa->email,
+            'password' => 'password',
+        ]);
+
+        // Berhasil login dan sesi di Device 1 otomatis dibatalkan/dihapus
+        $responseSuccess->assertRedirect(route('dashboard'));
+        $this->assertAuthenticatedAs($this->mahasiswa);
+        $this->assertEquals(0, \Illuminate\Support\Facades\DB::table('sessions')->where('id', 'device-1-session-token')->count());
+    }
+
+    public function test_dosen_can_render_html_live_monitoring_view(): void
+    {
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Essai View Monitoring',
+            'tipe_ujian' => 'essai',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 90,
+            'sifat' => 'fleksibel',
+        ]);
+
+        // Dosen mengakses via browser biasa (bukan AJAX/JSON)
+        $response = $this->actingAs($this->dosen)->get(route('dosen.live-monitoring', $test));
+
+        $response->assertOk();
+        $response->assertViewIs('dosen.live-monitoring');
+        $response->assertSee('Live Monitoring: ' . $test->judul);
+        $response->assertSee('Live Polling Aktif');
+    }
 }

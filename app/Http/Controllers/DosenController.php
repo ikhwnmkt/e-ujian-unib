@@ -163,9 +163,14 @@ class DosenController extends Controller
         return back()->with('ok', 'Nilai mahasiswa berhasil diperbarui.');
     }
 
-    public function liveMonitoring(Test $test)
+    public function liveMonitoring(Request $request, Test $test)
     {
         $test = $this->own($test);
+
+        // Jika request dari browser biasa (HTML), sajikan view monitoring
+        if (!$request->wantsJson() && !$request->ajax()) {
+            return view('dosen.live-monitoring', compact('test'));
+        }
 
         $allAttempts = $test->attempts()
             ->with([

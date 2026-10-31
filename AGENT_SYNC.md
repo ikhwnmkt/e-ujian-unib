@@ -410,3 +410,31 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Data ke View**:
   - `$role` (`string`): `mahasiswa` atau `dosen`.
   - `$user` (`App\Models\User`): Data user yang akan diedit.
+
+---
+
+### 6. Kredensial Login & Skenario Data Demo (`php artisan migrate:fresh --seed`)
+
+Untuk keperluan pengujian UI/Frontend, database telah diisi data demo realistis:
+
+#### Akun Pengguna (Password seluruh akun: `password`)
+| Role | Email | Password | Nomor Induk / NPM | Nama Lengkap | Skenario Demo |
+|---|---|---|---|---|---|
+| **Admin** | `admin@unib.ac.id` | `password` | - | Administrator UNIB | Kelola pengguna & lihat detail ujian peserta ter-deduplikasi. |
+| **Dosen** | `dosen@unib.ac.id` | `password` | `198001012005012001` | Dr. Ir. Dosen Pengampu, M.Kom. | Pembuat ujian, Live Monitoring ketikan essai, dan input nilai essai manual. |
+| **Mahasiswa 1** | `mhs1@unib.ac.id` | `password` | `G1A021001` | Aditya Pratama | **Fresh User**: Belum memiliki attempt sama sekali. Siap untuk demo klik "Mulai Ujian" dari nol (acak 30 soal dari 50 bank soal). |
+| **Mahasiswa 2** | `mhs2@unib.ac.id` | `password` | `G1A021002` | Budi Santoso | **Multi-Attempt & Live**: <br>1. *Ujian Pilgan*: Punya 2 attempt (Attempt 1 gagal skor 40, Attempt 2 lulus skor 80) -> Siap uji deduplikasi & riwayat remedial.<br>2. *Ujian Essai*: Sedang aktif mengerjakan (attempt belum selesai) dengan 2 jawaban live monitoring. |
+| **Mahasiswa 3** | `mhs3@unib.ac.id` | `password` | `G1A021003` | Citra Lestari | **Siap Dinilai**: <br>Sudah submit ujian essai lengkap (`nilai = null`, Menunggu Penilaian). Siap untuk demo form input/update nilai oleh Dosen. |
+
+#### Daftar Ujian Tersedia (Aktif Hari Ini)
+1. **Ujian Pilihan Ganda**:
+   - Judul: *Ujian Akhir Semester: Struktur Data & Algoritma*
+   - Materi: *Struktur Data & Algoritma*
+   - Bank Soal: **50 soal** (diambil acak **30 soal** per attempt)
+   - Durasi: **60 menit**, Sifat: **Fleksibel**, KKM: **70**
+2. **Ujian Essai**:
+   - Judul: *Ujian Tengah Semester: Analisis Kompleksitas Algoritma*
+   - Materi: *Analisis Kompleksitas Algoritma*
+   - Soal: **5 butir soal essai**
+   - Durasi: **90 menit**, Sifat: **Fleksibel**, KKM: **70**
+

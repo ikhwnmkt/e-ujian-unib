@@ -21,6 +21,7 @@ jobs:
         php: ['8.2', '8.4']
     env:
       APP_ENV: testing
+      APP_URL: http://localhost
       DB_CONNECTION: sqlite
       DB_DATABASE: ':memory:'
       MAIL_MAILER: array

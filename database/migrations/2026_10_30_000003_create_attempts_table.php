@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('attempts', function (Blueprint $table) {
             $table->id();
             $table->foreignId('test_id')->constrained('tests')->cascadeOnDelete();
-            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('user_id')->index()->constrained('users')->cascadeOnDelete();
             $table->json('question_ids')->nullable();
             $table->timestamp('started_at');
             $table->timestamp('finished_at')->nullable();

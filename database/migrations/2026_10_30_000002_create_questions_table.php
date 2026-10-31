@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('questions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('test_id')->constrained('tests')->cascadeOnDelete();
+            $table->foreignId('test_id')->index()->constrained('tests')->cascadeOnDelete();
             $table->enum('tipe', ['pilihan_ganda', 'essai'])->default('pilihan_ganda');
             $table->text('pertanyaan');
             $table->string('opsi_a')->nullable();

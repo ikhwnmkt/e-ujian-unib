@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('tests', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('dosen_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('dosen_id')->index()->constrained('users')->cascadeOnDelete();
             $table->string('judul');
             $table->string('materi')->nullable();
             $table->date('tanggal');

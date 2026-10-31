@@ -413,7 +413,28 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 
 ---
 
-### 6. Kredensial Login & Skenario Data Demo (`php artisan migrate:fresh --seed`)
+### 6. Struktur Database Migration & Seeder Modular
+
+#### A. Struktur Migration (1 Tabel = 1 File Migration)
+Arsitektur migrasi database telah dirapikan menjadi format 1 tabel per file tanpa file alter tambahan:
+1. `0001_01_01_000000_create_users_table.php` &rarr; Tabel `users` (lengkap dengan atribut profil, role, dan prodi).
+2. `0001_01_01_000001_create_password_reset_tokens_table.php` &rarr; Tabel `password_reset_tokens`.
+3. `0001_01_01_000002_create_sessions_table.php` &rarr; Tabel `sessions`.
+4. `0001_01_01_000003_create_cache_table.php` &rarr; Tabel `cache` & `cache_locks`.
+5. `0001_01_01_000004_create_jobs_table.php` &rarr; Tabel `jobs`, `job_batches`, & `failed_jobs`.
+6. `2026_10_30_000001_create_tests_table.php` &rarr; Tabel `tests` (lengkap dengan `tipe_ujian`, `materi`, `kkm`, `jumlah_soal_tampil`).
+7. `2026_10_30_000002_create_questions_table.php` &rarr; Tabel `questions` (lengkap dengan `tipe`, `pertanyaan`, opsi A-D, kunci, media).
+8. `2026_10_30_000003_create_attempts_table.php` &rarr; Tabel `attempts` (lengkap dengan `question_ids`, `started_at`, `finished_at`, `nilai`, dan index non-unique untuk remedial).
+9. `2026_10_30_000004_create_answers_table.php` &rarr; Tabel `answers` (lengkap dengan `jawaban`, `jawaban_essai`, `benar`).
+
+#### B. Seeder Modular
+Seeder dapat dijalankan sekaligus via `php artisan db:seed` atau secara terpisah per modul:
+* `Database\Seeders\UserSeeder` &rarr; Mengisi akun Admin, Dosen, dan 3 Mahasiswa.
+* `Database\Seeders\TestPilganSeeder` &rarr; Mengisi Ujian Pilgan (50 butir bank soal) dan riwayat remedial Mahasiswa 2.
+* `Database\Seeders\TestEssaiSeeder` &rarr; Mengisi Ujian Essai (5 butir soal essai), attempt live monitoring Mahasiswa 2, dan attempt siap nilai Mahasiswa 3.
+* `Database\Seeders\DatabaseSeeder` &rarr; Master seeder yang memanggil ketiga seeder di atas.
+
+#### C. Kredensial Login & Skenario Data Demo (`php artisan migrate:fresh --seed`)
 
 Untuk keperluan pengujian UI/Frontend, database telah diisi data demo realistis:
 

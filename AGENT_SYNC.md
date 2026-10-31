@@ -244,6 +244,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
         "started_at": "2026-10-31T00:10:00.000000Z",
         "finished_at": null,
         "is_finished": false,
+        "is_expired": false,
         "nilai": null,
         "is_passed": false,
         "updated_at": "2026-10-31T00:44:50.000000Z",
@@ -253,6 +254,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
             "question_id": 3,
             "pertanyaan": "Jelaskan konsep quick sort...",
             "tipe": "essai",
+            "pilihan": null,
             "jawaban_essai": "Quick sort menggunakan strategi divide and conquer...",
             "updated_at": "2026-10-31T00:44:50.000000Z"
           }
@@ -300,6 +302,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
   - `$test` (`App\Models\Test`): Objek ujian lengkap dengan `materi`, `kkm`, dan `tipe_ujian`.
   - `$questions` (`Illuminate\Support\Collection<App\Models\Question>`): Soal subset yang terkunci pada attempt ini.
   - `$sisaDetik` (`int`): Sisa durasi ujian dalam detik.
+  - `$savedAnswers` (`Illuminate\Support\Collection<int, App\Models\Answer>`): Koleksi jawaban mahasiswa yang telah tersimpan sebelumnya pada attempt ini, di-index berdasarkan `question_id` (berguna untuk prefill otomatis jika browser direfresh/melanjutkan ujian).
 
 #### `POST|GET /mahasiswa/tes/{test}/remedial`
 - **Route Name**: `mhs.remedial` (Alias URL: `/mahasiswa/ujian/{test}/remedial`)

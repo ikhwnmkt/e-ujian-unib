@@ -747,4 +747,56 @@ class ExamEdgeCasesAndConcurrencyTest extends TestCase
         $response->assertSee('Live Monitoring: ' . $test->judul);
         $response->assertSee('Live Polling Aktif');
     }
+
+    public function test_live_monitoring_supports_both_pilihan_ganda_and_essai_answers(): void
+    {
+        $testPilgan = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Pilgan Live Test',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        $q = Question::create([
+            'test_id' => $testPilgan->id,
+            'tipe' => 'pilihan_ganda',
+            'pertanyaan' => '1 + 1 = ?',
+            'opsi_a' => '2',
+            'opsi_b' => '3',
+            'opsi_c' => '4',
+            'opsi_d' => '5',
+            'jawaban_benar' => 'a',
+        ]);
+
+        $attempt = Attempt::create([
+            'test_id' => $testPilgan->id,
+            'user_id' => $this->mahasiswa->id,
+            'started_at' => now(),
+            'question_ids' => [$q->id],
+        ]);
+
+        Answer::create([
+            'attempt_id' => $attempt->id,
+            'question_id' => $q->id,
+            'jawaban' => 'a',
+            'benar' => true,
+        ]);
+
+        // Verifikasi live monitoring mengembalikan data pilihan
+        $response = $this->actingAs($this->dosen)->getJson('/dosen/ujian/' . $testPilgan->id . '/live-monitoring');
+        $response->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('attempts.0.answers.0.pilihan', 'a')
+            ->assertJsonPath('attempts.0.is_expired', false);
+
+        // Verifikasi view ujian mahasiswa mem-prefill jawaban tersimpan
+        $viewResponse = $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $testPilgan));
+        $viewResponse->assertOk()
+            ->assertViewHas('savedAnswers')
+            ->assertSee('checked');
+    }
 }

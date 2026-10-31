@@ -138,6 +138,7 @@ class MahasiswaController extends Controller
             'test' => $test,
             'questions' => $questions,
             'sisaDetik' => max(0, now()->diffInSeconds($deadline, false)),
+            'savedAnswers' => $attempt->answers()->get()->keyBy('question_id'),
         ]);
     }
 

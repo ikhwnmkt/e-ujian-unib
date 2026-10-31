@@ -176,7 +176,7 @@ class DosenController extends Controller
             ->with([
                 'user:id,name,nomor_induk,avatar',
                 'answers' => function ($q) {
-                    $q->select('id', 'attempt_id', 'question_id', 'jawaban_essai', 'updated_at')
+                    $q->select('id', 'attempt_id', 'question_id', 'jawaban', 'jawaban_essai', 'updated_at')
                       ->orderBy('question_id');
                 },
                 'answers.question:id,pertanyaan,tipe',
@@ -184,13 +184,22 @@ class DosenController extends Controller
             ->orderBy('id')
             ->get();
 
-        $attempts = $allAttempts->groupBy('user_id')->map(function ($userAttempts) {
+        $attempts = $allAttempts->groupBy('user_id')->map(function ($userAttempts) use ($test) {
             $attemptCount = $userAttempts->count();
             // Ambil attempt paling baru (latest id)
             $attempt = $userAttempts->sortByDesc('id')->first();
 
             $lastUpdatedAnswer = $attempt->answers->sortByDesc('updated_at')->first();
             $lastActivity = $lastUpdatedAnswer?->updated_at ?? $attempt->updated_at;
+
+            $isExpired = false;
+            if ($attempt->started_at && $attempt->finished_at === null) {
+                $deadline = $attempt->started_at->copy()->addMinutes($test->durasi);
+                if ($test->sifat === 'ketat') {
+                    $deadline = min($deadline, $test->selesai_at);
+                }
+                $isExpired = now()->gt($deadline);
+            }
 
             return [
                 'attempt_id' => $attempt->id,
@@ -204,6 +213,7 @@ class DosenController extends Controller
                 'started_at' => $attempt->started_at?->toIso8601String(),
                 'finished_at' => $attempt->finished_at?->toIso8601String(),
                 'is_finished' => !is_null($attempt->finished_at),
+                'is_expired' => $isExpired,
                 'nilai' => $attempt->nilai !== null ? (float) $attempt->nilai : null,
                 'is_passed' => $attempt->isPassed(),
                 'updated_at' => $lastActivity?->toIso8601String(),
@@ -213,6 +223,7 @@ class DosenController extends Controller
                         'question_id' => $ans->question_id,
                         'pertanyaan' => $ans->question?->pertanyaan,
                         'tipe' => $ans->question?->tipe,
+                        'pilihan' => $ans->pilihan,
                         'jawaban_essai' => $ans->jawaban_essai,
                         'updated_at' => $ans->updated_at?->toIso8601String(),
                     ];

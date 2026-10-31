@@ -34,7 +34,8 @@
 </div>
 
 <script>
-  const endpoint = "{{ route('dosen.live-monitoring', $test) }}";
+  // Gunakan window.location.href agar selalu cocok di localhost, 127.0.0.1, subfolder Laragon, maupun virtual host
+  const endpoint = window.location.href;
   const container = document.getElementById('attempts-container');
   const syncLabel = document.getElementById('last-sync');
   const countLabel = document.getElementById('peserta-count');
@@ -81,15 +82,24 @@
     data.attempts.forEach(item => {
       const u = item.user;
       const isFinished = item.is_finished;
-      const statusBadge = isFinished 
-        ? '<span style="background:#e3f6df;color:#256c1a;padding:3px 8px;border-radius:10px;font-size:12px;font-weight:700">Selesai Dikirim</span>'
-        : '<span style="background:#eaf2fd;color:#1d65c1;padding:3px 8px;border-radius:10px;font-size:12px;font-weight:700">⚡ Sedang Mengerjakan</span>';
+      const isExpired = item.is_expired;
+      let statusBadge = '';
+      if (isFinished) {
+        statusBadge = '<span style="background:#e3f6df;color:#256c1a;padding:3px 8px;border-radius:10px;font-size:12px;font-weight:700">✓ Selesai Dikirim</span>';
+      } else if (isExpired) {
+        statusBadge = '<span style="background:#fee2e2;color:#991b1b;padding:3px 8px;border-radius:10px;font-size:12px;font-weight:700">⏱ Waktu Habis</span>';
+      } else {
+        statusBadge = '<span style="background:#eaf2fd;color:#1d65c1;padding:3px 8px;border-radius:10px;font-size:12px;font-weight:700">⚡ Sedang Mengerjakan</span>';
+      }
       
       const attemptBadge = item.attempt_count > 1 
         ? `<span style="background:#fff3cd;color:#856404;padding:3px 8px;border-radius:10px;font-size:12px;font-weight:700">Percobaan ke-${item.attempt_count}</span>` 
         : '';
 
       const lastActivityTime = item.updated_at ? new Date(item.updated_at).toLocaleTimeString('id-ID') : '-';
+      const sectionTitle = (data.test && data.test.tipe_ujian === 'pilihan_ganda') 
+        ? 'Pantauan Jawaban Pilihan Ganda Real-Time:' 
+        : 'Pantauan Jawaban Essai Real-Time:';
 
       html += `
         <div class="card" style="box-shadow:0 2px 8px rgba(0,0,0,.1)">
@@ -105,16 +115,21 @@
             </div>
           </div>
           <div class="body" style="padding:16px">
-            <h4 style="margin:0 0 12px;font-size:14px;color:#333">Pantauan Jawaban Essai Real-Time:</h4>
+            <h4 style="margin:0 0 12px;font-size:14px;color:#333">${sectionTitle}</h4>
       `;
 
       if (!item.answers || item.answers.length === 0) {
-        html += `<div style="font-style:italic;color:#888;font-size:13px">Mahasiswa belum mulai mengetik jawaban pada butir soal mana pun.</div>`;
+        html += `<div style="font-style:italic;color:#888;font-size:13px">Mahasiswa belum mulai menjawab butir soal mana pun.</div>`;
       } else {
         item.answers.forEach((ans, i) => {
-          const answerText = ans.jawaban_essai && ans.jawaban_essai.trim() !== '' 
-            ? escapeHtml(ans.jawaban_essai) 
-            : '<span style="color:#aaa;font-style:italic">(Belum ada ketikan jawaban)</span>';
+          let answerContent = '';
+          if (ans.pilihan) {
+            answerContent = `<div style="font-weight:bold;font-size:14px;color:#1d65c1;background:#eaf2fd;padding:8px 14px;border-radius:6px;display:inline-block">Pilihan: Opsi ${escapeHtml(ans.pilihan.toUpperCase())}</div>`;
+          } else if (ans.jawaban_essai && ans.jawaban_essai.trim() !== '') {
+            answerContent = `<div style="white-space:pre-wrap;font-family:inherit;font-size:14px;background:#fff;padding:10px;border-radius:6px;border:1px solid #ddd;min-height:48px;line-height:1.6">${escapeHtml(ans.jawaban_essai)}</div>`;
+          } else {
+            answerContent = '<span style="color:#aaa;font-style:italic">(Belum ada jawaban tersimpan)</span>';
+          }
           
           const answerTime = ans.updated_at ? new Date(ans.updated_at).toLocaleTimeString('id-ID') : '-';
 
@@ -124,7 +139,7 @@
                 <b>Soal: ${escapeHtml(ans.pertanyaan || 'Soal')}</b>
                 <small style="color:#777">Update: ${answerTime}</small>
               </div>
-              <div style="white-space:pre-wrap;font-family:inherit;font-size:14px;background:#fff;padding:10px;border-radius:6px;border:1px solid #ddd;min-height:48px;line-height:1.6">${answerText}</div>
+              ${answerContent}
             </div>
           `;
         });

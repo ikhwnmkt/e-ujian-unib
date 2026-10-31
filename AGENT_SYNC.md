@@ -466,3 +466,54 @@ Untuk keperluan pengujian UI/Frontend, database telah diisi data demo realistis:
    - Soal: **5 butir soal essai**
    - Durasi: **90 menit**, Sifat: **Fleksibel**, KKM: **70**
 
+
+---
+
+## ⚙️ Konfigurasi Environment (Setup Developer)
+
+### Root Cause Fix: Live Monitoring & APP_URL
+
+Live monitoring tidak bekerja di browser karena **`APP_URL` tidak sesuai** dengan path subfolder Laragon.
+
+**Masalah**: Ketika app Laravel berjalan di `http://localhost/e-ujian-unib/` (subfolder Laragon), helper `route()` di Blade menghasilkan URL yang salah jika `APP_URL=http://localhost`.
+
+**Solusi**: Set `APP_URL=http://localhost/e-ujian-unib` di `.env` agar helper `route()` dan `asset()` menghasilkan URL yang benar dengan prefix subfolder.
+
+### File Environment yang Diperlukan
+
+#### `.env` (Development / Production - TIDAK di git)
+```env
+APP_URL=http://localhost/e-ujian-unib   # ← WAJIB sesuaikan dengan path Laragon
+APP_KEY=base64:...
+DB_CONNECTION=mysql
+DB_DATABASE=ujian_unib
+DB_USERNAME=root
+DB_PASSWORD=1234
+SESSION_DRIVER=database
+```
+
+#### `.env.testing` (Test Runner - TIDAK di git)
+```env
+APP_URL=http://localhost   # ← HARUS http://localhost untuk PHPUnit TestCase
+APP_KEY=base64:...
+DB_CONNECTION=mysql
+DB_DATABASE=ujian_unib_test   # ← DB terpisah untuk test
+DB_USERNAME=root
+DB_PASSWORD=1234
+SESSION_DRIVER=array
+```
+
+> **PENTING untuk Developer Baru**: Setelah clone repo:
+> 1. Copy `.env.example` → `.env`, sesuaikan `APP_URL` dengan path subfolder Laragon
+> 2. Buat `.env.testing` seperti template di atas dengan `DB_DATABASE=ujian_unib_test` dan `APP_URL=http://localhost`
+> 3. Buat database test: `CREATE DATABASE ujian_unib_test;`
+> 4. Jalankan `php artisan migrate --env=testing`
+> 5. Jalankan `php artisan migrate:fresh --seed` untuk seed data development
+
+### URL Live Monitoring di Browser
+
+Setelah login sebagai **Dosen** → Dashboard → klik tombol **"Live Monitoring"** pada ujian yang sedang berlangsung.
+
+URL format: `http://localhost/e-ujian-unib/dosen/ujian/{test_id}/live-monitoring`
+
+JS polling tiap 3 detik akan fetch ke endpoint yang sama dengan header `Accept: application/json` + `X-Requested-With: XMLHttpRequest` → Controller mendeteksi AJAX dan mengembalikan JSON.

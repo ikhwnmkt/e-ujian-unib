@@ -40,4 +40,52 @@ class Test extends Model
     }
     public function berlangsung(): bool { return now()->between($this->mulai_at, $this->selesai_at); }
     public function selesai(): bool { return now()->gt($this->selesai_at); }
+
+    public function getPesertaCountAttribute(): int
+    {
+        return $this->pesertaCount();
+    }
+
+    public function pesertaCount(): int
+    {
+        return $this->attempts()->distinct('user_id')->count('user_id');
+    }
+
+    /**
+     * Mengembalikan daftar attempt utama ter-deduplikasi (1 attempt per mahasiswa)
+     * Mengambil attempt dengan nilai tertinggi (atau attempt terbaru jika nilai sama/null)
+     * beserta atribut dinamis: attempt_count, first_score, latest_score, best_score, history
+     */
+    public function getPrimaryAttempts(): \Illuminate\Support\Collection
+    {
+        $allAttempts = $this->attempts()
+            ->with(['user', 'answers.question'])
+            ->orderBy('id')
+            ->get();
+
+        return $allAttempts->groupBy('user_id')->map(function ($userAttempts) {
+            $chronological = $userAttempts->sortBy('id')->values();
+            $scored = $chronological->filter(fn ($att) => $att->nilai !== null);
+
+            $firstScore = $chronological->first()->nilai !== null ? (float) $chronological->first()->nilai : null;
+            $latestScore = $chronological->last()->nilai !== null ? (float) $chronological->last()->nilai : null;
+
+            if ($scored->isNotEmpty()) {
+                $maxScore = (float) $scored->max('nilai');
+                $bestScore = $maxScore;
+                $primary = $scored->filter(fn ($att) => (float) $att->nilai === $maxScore)->sortByDesc('id')->first();
+            } else {
+                $bestScore = null;
+                $primary = $chronological->last();
+            }
+
+            $primary->attempt_count = $chronological->count();
+            $primary->first_score = $firstScore;
+            $primary->latest_score = $latestScore;
+            $primary->best_score = $bestScore;
+            $primary->history = $chronological;
+
+            return $primary;
+        })->values();
+    }
 }

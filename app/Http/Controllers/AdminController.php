@@ -15,7 +15,10 @@ class AdminController extends Controller
 
     public function detail(Test $test)
     {
-        return view('admin.detail', ['test' => $test->load('dosen', 'attempts.user')->loadCount('questions')]);
+        $test->load('dosen')->loadCount('questions');
+        $test->setRelation('attempts', $test->getPrimaryAttempts());
+
+        return view('admin.detail', ['test' => $test]);
     }
 
     public function users(string $role)

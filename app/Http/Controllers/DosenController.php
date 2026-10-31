@@ -123,9 +123,10 @@ class DosenController extends Controller
 
     public function nilai(Test $test)
     {
+        $test = $this->own($test);
         return view('dosen.nilai', [
-            'test' => $this->own($test),
-            'attempts' => $test->attempts()->with(['user', 'answers.question'])->get(),
+            'test' => $test,
+            'attempts' => $test->getPrimaryAttempts(),
         ]);
     }
 
@@ -156,7 +157,7 @@ class DosenController extends Controller
     {
         $test = $this->own($test);
 
-        $attempts = $test->attempts()
+        $allAttempts = $test->attempts()
             ->with([
                 'user:id,name,nomor_induk,avatar',
                 'answers' => function ($q) {
@@ -165,38 +166,46 @@ class DosenController extends Controller
                 },
                 'answers.question:id,pertanyaan,tipe',
             ])
-            ->orderByDesc('updated_at')
-            ->get()
-            ->map(function ($attempt) {
-                $lastUpdatedAnswer = $attempt->answers->sortByDesc('updated_at')->first();
-                $lastActivity = $lastUpdatedAnswer?->updated_at ?? $attempt->updated_at;
+            ->orderBy('id')
+            ->get();
 
-                return [
-                    'attempt_id' => $attempt->id,
-                    'user' => [
-                        'id' => $attempt->user->id,
-                        'name' => $attempt->user->name,
-                        'nomor_induk' => $attempt->user->nomor_induk,
-                        'avatar' => $attempt->user->avatar,
-                    ],
-                    'started_at' => $attempt->started_at?->toIso8601String(),
-                    'finished_at' => $attempt->finished_at?->toIso8601String(),
-                    'is_finished' => !is_null($attempt->finished_at),
-                    'nilai' => $attempt->nilai !== null ? (float) $attempt->nilai : null,
-                    'is_passed' => $attempt->isPassed(),
-                    'updated_at' => $lastActivity?->toIso8601String(),
-                    'answers' => $attempt->answers->map(function ($ans) {
-                        return [
-                            'id' => $ans->id,
-                            'question_id' => $ans->question_id,
-                            'pertanyaan' => $ans->question?->pertanyaan,
-                            'tipe' => $ans->question?->tipe,
-                            'jawaban_essai' => $ans->jawaban_essai,
-                            'updated_at' => $ans->updated_at?->toIso8601String(),
-                        ];
-                    }),
-                ];
-            });
+        $attempts = $allAttempts->groupBy('user_id')->map(function ($userAttempts) {
+            $attemptCount = $userAttempts->count();
+            // Ambil attempt paling baru (latest id)
+            $attempt = $userAttempts->sortByDesc('id')->first();
+
+            $lastUpdatedAnswer = $attempt->answers->sortByDesc('updated_at')->first();
+            $lastActivity = $lastUpdatedAnswer?->updated_at ?? $attempt->updated_at;
+
+            return [
+                'attempt_id' => $attempt->id,
+                'attempt_count' => $attemptCount,
+                'user' => [
+                    'id' => $attempt->user->id,
+                    'name' => $attempt->user->name,
+                    'nomor_induk' => $attempt->user->nomor_induk,
+                    'avatar' => $attempt->user->avatar,
+                ],
+                'started_at' => $attempt->started_at?->toIso8601String(),
+                'finished_at' => $attempt->finished_at?->toIso8601String(),
+                'is_finished' => !is_null($attempt->finished_at),
+                'nilai' => $attempt->nilai !== null ? (float) $attempt->nilai : null,
+                'is_passed' => $attempt->isPassed(),
+                'updated_at' => $lastActivity?->toIso8601String(),
+                'answers' => $attempt->answers->map(function ($ans) {
+                    return [
+                        'id' => $ans->id,
+                        'question_id' => $ans->question_id,
+                        'pertanyaan' => $ans->question?->pertanyaan,
+                        'tipe' => $ans->question?->tipe,
+                        'jawaban_essai' => $ans->jawaban_essai,
+                        'updated_at' => $ans->updated_at?->toIso8601String(),
+                    ];
+                })->values(),
+            ];
+        })
+        ->sortByDesc('updated_at')
+        ->values();
 
         return response()->json([
             'status' => 'success',
@@ -207,6 +216,7 @@ class DosenController extends Controller
                 'tipe_ujian' => $test->tipe_ujian,
                 'kkm' => $test->kkm ?? 70,
                 'jumlah_soal_tampil' => $test->jumlah_soal_tampil ?? 30,
+                'peserta_count' => $test->peserta_count,
             ],
             'server_time' => now()->toIso8601String(),
             'attempts' => $attempts,

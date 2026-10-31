@@ -183,9 +183,15 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Target Blade**: `resources/views/dosen/nilai.blade.php`
 - **Data ke View**:
   - `$test` (`App\Models\Test`): Data tes.
-  - `$attempts` (`Illuminate\Database\Eloquent\Collection<App\Models\Attempt>`): Seluruh riwayat pengerjaan mahasiswa beserta eager loading `user` dan `answers.question`.
-    - Properti Attempt: `id`, `test_id`, `user_id`, `started_at`, `finished_at`, `nilai`, `is_passed`.
-    - *Catatan Multi-Attempt*: Saat ini mengembalikan seluruh attempt mahasiswa (muncul per attempt jika remedial). Kebijakan nilai akhir tunggal (apakah nilai tertinggi atau nilai attempt terakhir) masih menunggu konfirmasi Product Owner (PO).
+  - `$attempts` (`Illuminate\Support\Collection<App\Models\Attempt>`): Koleksi **Attempt utama ter-deduplikasi (1 baris per mahasiswa)**, di mana mahasiswa yang remedial tidak muncul sebagai baris ganda.
+    - **Aturan Pemilihan Record Utama**: Menggunakan attempt dengan nilai tertinggi (`best_score`), atau attempt paling baru jika nilai sama/belum dinilai.
+    - **Properti Model Attempt Bawaan**: `id`, `test_id`, `user_id`, `started_at`, `finished_at`, `nilai`, `is_passed`, `user`.
+    - **Atribut Dinamis (Siap Dipakai Frontend Blade)**:
+      - `attempt_count` (`int`): Total berapa kali mahasiswa tersebut mencoba ujian ini (misal: `1` untuk peserta reguler, `2` atau lebih untuk yang remedial). Frontend dapat menampilkan badge seperti `Percobaan ke-2`.
+      - `first_score` (`float|null`): Nilai pada percobaan pertama mahasiswa.
+      - `latest_score` (`float|null`): Nilai pada percobaan terakhir mahasiswa.
+      - `best_score` (`float|null`): Nilai tertinggi yang diraih dari seluruh percobaan.
+      - `history` (`Illuminate\Support\Collection<App\Models\Attempt>`): Riwayat lengkap seluruh percobaan mahasiswa (terurut dari percobaan ke-1 hingga terakhir) untuk kebutuhan dropdown/accordion audit detail.
 
 #### `POST|PUT /dosen/ujian/{test}/nilai/{attempt}`
 - **Route Name**: `dosen.nilai.update` (Alias URL: `/dosen/tes/{test}/nilai/{attempt}`)
@@ -201,6 +207,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Route Name**: `dosen.live-monitoring` (Alias URL: `/dosen/tes/{test}/live-monitoring`)
 - **Controller**: `DosenController@liveMonitoring`
 - **Kegunaan**: Polling AJAX near real-time oleh frontend dosen untuk memantau ketikan jawaban essai mahasiswa.
+- **Deduplikasi**: Mahasiswa yang remedial **hanya muncul 1 kali** (mengambil attempt paling mutakhir / `latest('id')`), dengan penanda `attempt_count`.
 - **Response JSON**:
   ```json
   {
@@ -211,12 +218,14 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
       "materi": "Sorting & Searching",
       "tipe_ujian": "pilihan_ganda",
       "kkm": 70,
-      "jumlah_soal_tampil": 30
+      "jumlah_soal_tampil": 30,
+      "peserta_count": 1
     },
     "server_time": "2026-10-31T01:00:00.000000Z",
     "attempts": [
       {
-        "attempt_id": 12,
+        "attempt_id": 15,
+        "attempt_count": 2,
         "user": {
           "id": 5,
           "name": "Bahlil Lahadalia",
@@ -338,7 +347,8 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Controller**: `AdminController@detail`
 - **Target Blade**: `resources/views/admin/detail.blade.php`
 - **Data ke View**:
-  - `$test` (`App\Models\Test` eager load `dosen`, `attempts.user` dan count `questions`).
+  - `$test` (`App\Models\Test` eager load `dosen`, count `questions`, dan relasi `attempts` yang telah di-deduplikasi 1 record per mahasiswa):
+    - `$test->attempts`: Berisi koleksi record Attempt utama (nilai terbaik/terakhir) lengkap dengan atribut dinamis `attempt_count`, `first_score`, `latest_score`, `best_score`, dan `history`. Mahasiswa remedial tidak muncul sebagai baris ganda pada tabel peserta admin.
 
 #### `GET /admin/pengguna/{role}`
 - **Route Name**: `admin.users`

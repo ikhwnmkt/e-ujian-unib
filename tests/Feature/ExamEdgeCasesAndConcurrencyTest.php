@@ -277,4 +277,87 @@ class ExamEdgeCasesAndConcurrencyTest extends TestCase
         $this->assertNotEquals($expiredAttempt->id, $newAttempt->id);
         $this->assertNull($newAttempt->finished_at);
     }
+
+    public function test_remedial_student_appears_only_once_in_live_monitoring_and_rekap_nilai_with_attempt_count(): void
+    {
+        $admin = User::create([
+            'name' => 'Admin Penguji',
+            'email' => 'admin_edge@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'admin',
+        ]);
+
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Deduplikasi Rekap & Monitoring',
+            'materi' => 'Database Relasional',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        $q1 = Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q1', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+        $q2 = Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q2', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+
+        // Attempt 1: Mahasiswa ikut ujian dan dapat nilai 50.0 (< KKM 70)
+        $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $test), [
+            'jawaban' => [$q1->id => 'a', $q2->id => 'b'],
+        ]);
+        $attempt1 = Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->latest('id')->first();
+        $this->assertEquals(50.0, (float) $attempt1->nilai);
+
+        // Attempt 2: Remedial dan dapat nilai 100.0 (>= KKM 70)
+        $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $test), [
+            'jawaban' => [$q1->id => 'a', $q2->id => 'a'],
+        ]);
+        $attempt2 = Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->latest('id')->first();
+        $this->assertEquals(100.0, (float) $attempt2->nilai);
+        $this->assertNotEquals($attempt1->id, $attempt2->id);
+
+        // Verifikasi total attempt di DB = 2
+        $this->assertEquals(2, Attempt::where('test_id', $test->id)->where('user_id', $this->mahasiswa->id)->count());
+
+        // 1. Verifikasi Penghitungan Jumlah Peserta (Distinct user_id)
+        $this->assertEquals(1, $test->pesertaCount());
+        $this->assertEquals(1, $test->peserta_count);
+
+        // 2. Verifikasi liveMonitoring Dosen: hanya 1 entri per mahasiswa dengan attempt_count = 2
+        $liveResponse = $this->actingAs($this->dosen)->getJson('/dosen/ujian/' . $test->id . '/live-monitoring');
+        $liveResponse->assertOk()
+            ->assertJsonCount(1, 'attempts')
+            ->assertJsonPath('attempts.0.attempt_count', 2)
+            ->assertJsonPath('attempts.0.attempt_id', $attempt2->id) // attempt terbaru
+            ->assertJsonPath('attempts.0.user.id', $this->mahasiswa->id)
+            ->assertJsonPath('test.peserta_count', 1);
+
+        // 3. Verifikasi Rekap Nilai Dosen (dosen.nilai): hanya 1 entri dengan atribut dinamis
+        $dosenResponse = $this->actingAs($this->dosen)->get(route('dosen.nilai', $test));
+        $dosenResponse->assertOk();
+        $dosenAttempts = $dosenResponse->viewData('attempts');
+
+        $this->assertCount(1, $dosenAttempts);
+        $primaryAttempt = $dosenAttempts->first();
+        $this->assertEquals($this->mahasiswa->id, $primaryAttempt->user_id);
+        $this->assertEquals(2, $primaryAttempt->attempt_count);
+        $this->assertEquals(50.0, $primaryAttempt->first_score);
+        $this->assertEquals(100.0, $primaryAttempt->latest_score);
+        $this->assertEquals(100.0, $primaryAttempt->best_score);
+        $this->assertEquals(100.0, (float) $primaryAttempt->nilai); // primary attempt mengambil best score
+        $this->assertCount(2, $primaryAttempt->history);
+
+        // 4. Verifikasi Detail Admin (admin.detail): hanya 1 entri per mahasiswa
+        $adminResponse = $this->actingAs($admin)->get(route('admin.detail', $test));
+        $adminResponse->assertOk();
+        $adminTest = $adminResponse->viewData('test');
+        $this->assertCount(1, $adminTest->attempts);
+        $this->assertEquals(2, $adminTest->attempts->first()->attempt_count);
+        $this->assertEquals(100.0, (float) $adminTest->attempts->first()->best_score);
+    }
 }

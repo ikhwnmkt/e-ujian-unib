@@ -1,6 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 
+use App\Models\Attempt;
 use App\Models\Question;
 use App\Models\Test;
 use Illuminate\Http\Request;
@@ -18,11 +19,15 @@ class DosenController extends Controller
     {
         return [
             'judul' => 'required|string|max:255',
+            'materi' => 'nullable|string|max:255',
+            'tipe_ujian' => 'nullable|in:pilihan_ganda,essai',
             'tanggal' => 'required|date',
             'jam_mulai' => 'required|date_format:H:i',
             'jam_selesai' => 'required|date_format:H:i|after:jam_mulai',
             'durasi' => 'required|integer|min:1|max:600',
             'sifat' => 'required|in:fleksibel,ketat',
+            'jumlah_soal_tampil' => 'nullable|integer|min:1|max:1000',
+            'kkm' => 'nullable|integer|min:0|max:100',
         ];
     }
 
@@ -35,11 +40,26 @@ class DosenController extends Controller
         ]);
     }
 
-    public function create() { return view('dosen.form', ['test' => new Test(['durasi' => 90, 'sifat' => 'fleksibel'])]); }
+    public function create()
+    {
+        return view('dosen.form', [
+            'test' => new Test([
+                'durasi' => 90,
+                'sifat' => 'fleksibel',
+                'tipe_ujian' => 'pilihan_ganda',
+                'jumlah_soal_tampil' => 30,
+                'kkm' => 70,
+            ]),
+        ]);
+    }
 
     public function store(Request $r)
     {
-        $test = auth()->user()->tests()->create($r->validate($this->rules()));
+        $data = $r->validate($this->rules());
+        $data['tipe_ujian'] = $data['tipe_ujian'] ?? 'pilihan_ganda';
+        $data['jumlah_soal_tampil'] = $data['jumlah_soal_tampil'] ?? 30;
+        $data['kkm'] = $data['kkm'] ?? 70;
+        $test = auth()->user()->tests()->create($data);
         return redirect()->route('dosen.soal', $test)->with('ok', 'Tes dibuat. Silakan tambahkan soal.');
     }
 
@@ -47,7 +67,11 @@ class DosenController extends Controller
 
     public function update(Request $r, Test $test)
     {
-        $this->own($test)->update($r->validate($this->rules()));
+        $data = $r->validate($this->rules());
+        if (empty($data['tipe_ujian'])) {
+            unset($data['tipe_ujian']);
+        }
+        $this->own($test)->update($data);
         return redirect()->route('dosen.index')->with('ok', 'Tes diperbarui.');
     }
 
@@ -64,19 +88,28 @@ class DosenController extends Controller
 
     public function soalStore(Request $r, Test $test)
     {
+        $test = $this->own($test);
+        $defaultTipe = $test->tipe_ujian ?? 'pilihan_ganda';
         $data = $r->validate([
-            'tipe' => 'required|in:pilihan_ganda,essai',
+            'tipe' => 'nullable|in:pilihan_ganda,essai',
             'pertanyaan' => 'required|string',
             'media_type' => 'nullable|in:gambar,link',
             'media_url' => 'nullable|required_if:media_type,link|url|max:2048',
             'media_file' => 'nullable|required_if:media_type,gambar|image|max:5120',
         ]);
+
+        $data['tipe'] = $data['tipe'] ?? $defaultTipe;
+
         if (($data['media_type'] ?? null) === 'gambar') {
-            $data['media_url'] = Storage::disk('public')->url($r->file('media_file')->store('question-media', 'public'));
-        } elseif (($data['media_type'] ?? null) !== 'link') {
-            $data['media_url'] = null;
+            $data['media_url'] = Storage::disk('public')->url(
+                $r->file('media_file')->store('question-media', 'public')
+            );
+        } elseif (($data['media_type'] ?? null) === 'link') {
+            $data['media_url'] = $data['media_url'] ?? null;
         }
-        unset($data['media_file']);
+
+unset($data['media_file']);
+
         if ($data['tipe'] === 'pilihan_ganda') {
             $data = array_merge($data, $r->validate([
                 'opsi_a' => 'required|string|max:255',
@@ -91,7 +124,7 @@ class DosenController extends Controller
                 'jawaban_benar' => null,
             ]);
         }
-        $this->own($test)->questions()->create($data);
+        $test->questions()->create($data);
         return back()->with('ok', 'Soal ditambahkan.');
     }
 
@@ -107,6 +140,129 @@ class DosenController extends Controller
 
     public function nilai(Test $test)
     {
-        return view('dosen.nilai', ['test' => $this->own($test), 'attempts' => $test->attempts()->with('user')->get()]);
+        $test = $this->own($test);
+        return view('dosen.nilai', [
+            'test' => $test,
+            'attempts' => $test->getPrimaryAttempts(),
+        ]);
+    }
+
+    public function updateNilai(Request $r, Test $test, Attempt $attempt)
+    {
+        $test = $this->own($test);
+        abort_unless($attempt->test_id === $test->id, 404);
+
+        if ($test->tipe_ujian === 'pilihan_ganda' || empty($test->tipe_ujian)) {
+            if ($r->expectsJson() || $r->wantsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Penilaian manual hanya diizinkan untuk ujian bertipe essai.',
+                ], 422);
+            }
+            return back()->with('err', 'Penilaian manual hanya diizinkan untuk ujian bertipe essai.');
+        }
+
+        $data = $r->validate([
+            'nilai' => 'required|numeric|min:0|max:100',
+        ]);
+
+        $attempt->update(['nilai' => $data['nilai']]);
+
+        if ($r->expectsJson() || $r->wantsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Nilai berhasil disimpan.',
+                'attempt_id' => $attempt->id,
+                'nilai' => (float) $attempt->nilai,
+            ]);
+        }
+
+        return back()->with('ok', 'Nilai mahasiswa berhasil diperbarui.');
+    }
+
+    public function liveMonitoring(Request $request, Test $test)
+    {
+        $test = $this->own($test);
+
+        // Jika request dari browser biasa (HTML), sajikan view monitoring
+        if (!$request->wantsJson() && !$request->ajax()) {
+            return view('dosen.live-monitoring', compact('test'));
+        }
+
+        $allAttempts = $test->attempts()
+            ->with([
+                'user:id,name,nomor_induk,avatar',
+                'answers' => function ($q) {
+                    $q->select('id', 'attempt_id', 'question_id', 'jawaban', 'jawaban_essai', 'updated_at')
+                      ->orderBy('question_id');
+                },
+                'answers.question:id,pertanyaan,tipe',
+            ])
+            ->orderBy('id')
+            ->get();
+
+        $attempts = $allAttempts->groupBy('user_id')->map(function ($userAttempts) use ($test) {
+            $attemptCount = $userAttempts->count();
+            // Ambil attempt paling baru (latest id)
+            $attempt = $userAttempts->sortByDesc('id')->first();
+
+            $lastUpdatedAnswer = $attempt->answers->sortByDesc('updated_at')->first();
+            $lastActivity = $lastUpdatedAnswer?->updated_at ?? $attempt->updated_at;
+
+            $isExpired = false;
+            if ($attempt->started_at && $attempt->finished_at === null) {
+                $deadline = $attempt->started_at->copy()->addMinutes($test->durasi);
+                if ($test->sifat === 'ketat') {
+                    $deadline = min($deadline, $test->selesai_at);
+                }
+                $isExpired = now()->gt($deadline);
+            }
+
+            return [
+                'attempt_id' => $attempt->id,
+                'attempt_count' => $attemptCount,
+                'user' => [
+                    'id' => $attempt->user->id,
+                    'name' => $attempt->user->name,
+                    'nomor_induk' => $attempt->user->nomor_induk,
+                    'avatar' => $attempt->user->avatar,
+                ],
+                'started_at' => $attempt->started_at?->toIso8601String(),
+                'finished_at' => $attempt->finished_at?->toIso8601String(),
+                'is_finished' => !is_null($attempt->finished_at),
+                'is_expired' => $isExpired,
+                'nilai' => $attempt->nilai !== null ? (float) $attempt->nilai : null,
+                'is_passed' => $attempt->isPassed(),
+                'updated_at' => $lastActivity?->toIso8601String(),
+                'answers' => $attempt->answers->map(function ($ans) {
+                    return [
+                        'id' => $ans->id,
+                        'question_id' => $ans->question_id,
+                        'pertanyaan' => $ans->question?->pertanyaan,
+                        'tipe' => $ans->question?->tipe,
+                        'pilihan' => $ans->pilihan,
+                        'jawaban_essai' => $ans->jawaban_essai,
+                        'updated_at' => $ans->updated_at?->toIso8601String(),
+                    ];
+                })->values(),
+            ];
+        })
+        ->sortByDesc('updated_at')
+        ->values();
+
+        return response()->json([
+            'status' => 'success',
+            'test' => [
+                'id' => $test->id,
+                'judul' => $test->judul,
+                'materi' => $test->materi,
+                'tipe_ujian' => $test->tipe_ujian,
+                'kkm' => $test->kkm ?? 70,
+                'jumlah_soal_tampil' => $test->jumlah_soal_tampil ?? 30,
+                'peserta_count' => $test->peserta_count,
+            ],
+            'server_time' => now()->toIso8601String(),
+            'attempts' => $attempts,
+        ]);
     }
 }

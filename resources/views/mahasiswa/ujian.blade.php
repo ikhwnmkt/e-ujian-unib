@@ -31,12 +31,16 @@
           @elseif($q->media_type === 'link' && $q->media_url)
             <div style="margin:12px 0"><a href="{{ $q->media_url }}" target="_blank" rel="noopener noreferrer">{{ $q->media_url }}</a></div>
           @endif
+          @php $saved = $savedAnswers[$q->id] ?? null; @endphp
           @if($q->tipe === 'essai')
             <label for="essay-{{ $q->id }}">Jawaban esai</label>
-            <textarea id="essay-{{ $q->id }}" name="jawaban_essai[{{ $q->id }}]" rows="6" class="answer-input"></textarea>
+            <textarea id="essay-{{ $q->id }}" name="jawaban_essai[{{ $q->id }}]" rows="6" class="answer-input" data-qid="{{ $q->id }}">{{ $saved?->jawaban_essai }}</textarea>
           @else
             @foreach(['a','b','c','d'] as $o)
-              <label class="opt"><input class="answer-input" type="radio" name="jawaban[{{ $q->id }}]" value="{{ $o }}">{{ strtoupper($o) }}. {{ $q['opsi_'.$o] }}</label>
+              <label class="opt">
+                <input class="answer-input" type="radio" name="jawaban[{{ $q->id }}]" value="{{ $o }}" data-qid="{{ $q->id }}" {{ ($saved && $saved->pilihan === $o) ? 'checked' : '' }}>
+                {{ strtoupper($o) }}. {{ $q['opsi_'.$o] }}
+              </label>
             @endforeach
           @endif
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:16px">
@@ -103,5 +107,45 @@ questions.forEach((question, index) => {
   });
 });
 render();
+
+// Autosave Engine Real-Time
+const autosaveUrl = "{{ route('mhs.autosave', $test) }}";
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || "{{ csrf_token() }}";
+const autosaveTimers = {};
+
+function saveAnswer(qid, payload) {
+  fetch(autosaveUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-CSRF-TOKEN': csrfToken,
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    body: JSON.stringify(Object.assign({ question_id: qid }, payload))
+  }).then(async res => {
+    if (res.status === 409) {
+      const data = await res.json();
+      alert(data.message || 'Waktu ujian telah habis.');
+      window.location.href = data.redirect || "{{ route('mhs.hasil', $test) }}";
+    }
+  }).catch(err => console.error('Autosave error:', err));
+}
+
+document.querySelectorAll('input[type="radio"].answer-input').forEach(radio => {
+  radio.addEventListener('change', () => {
+    saveAnswer(radio.dataset.qid, { pilihan: radio.value });
+  });
+});
+
+document.querySelectorAll('textarea.answer-input').forEach(textarea => {
+  textarea.addEventListener('input', () => {
+    const qid = textarea.dataset.qid;
+    clearTimeout(autosaveTimers[qid]);
+    autosaveTimers[qid] = setTimeout(() => {
+      saveAnswer(qid, { jawaban_essai: textarea.value });
+    }, 800);
+  });
+});
 </script>
 @endsection

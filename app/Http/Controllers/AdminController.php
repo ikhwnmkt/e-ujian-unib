@@ -15,7 +15,10 @@ class AdminController extends Controller
 
     public function detail(Test $test)
     {
-        return view('admin.detail', ['test' => $test->load('dosen', 'attempts.user')->loadCount('questions')]);
+        $test->load('dosen')->loadCount('questions');
+        $test->setRelation('attempts', $test->getPrimaryAttempts());
+
+        return view('admin.detail', ['test' => $test]);
     }
 
     public function users(string $role)
@@ -27,7 +30,11 @@ class AdminController extends Controller
     public function createUser(string $role)
     {
         $this->validateRole($role);
-        return view('admin.user-form', ['role' => $role, 'user' => new User()]);
+        return view('admin.user-form', [
+            'role' => $role,
+            'user' => new User(),
+            'prodiByFaculty' => $this->prodiByFaculty(),
+        ]);
     }
 
     public function storeUser(Request $request, string $role)
@@ -49,7 +56,11 @@ class AdminController extends Controller
     public function editUser(string $role, User $user)
     {
         $this->ensureUserRole($role, $user);
-        return view('admin.user-form', compact('role', 'user'));
+        return view('admin.user-form', [
+            'role' => $role,
+            'user' => $user,
+            'prodiByFaculty' => $this->prodiByFaculty(),
+        ]);
     }
 
     public function updateUser(Request $request, string $role, User $user)
@@ -93,12 +104,35 @@ class AdminController extends Controller
             'email' => ['required', 'email', 'max:255', $emailRule],
             'nomor_induk' => ['required', 'string', 'max:30', $numberRule],
             'no_hp' => ['nullable', 'string', 'max:30'],
-            'fakultas' => ['required', 'string', 'max:255'],
+            'fakultas' => ['required', Rule::in($this->faculties())],
             'prodi' => ['required', 'string', 'max:255'],
             'tempat_lahir' => ['nullable', 'string', 'max:255'],
             'tanggal_lahir' => ['nullable', 'date'],
             'status' => ['required', Rule::in(['aktif', 'nonaktif'])],
             'password' => $passwordRules,
         ];
+    }
+
+    private function faculties(): array
+    {
+        return [
+            'Teknik',
+            'Hukum',
+            'Ilmu Keolahragaan',
+            'Kedokteran',
+            'Matematika dan Ilmu Pengetahuan',
+            'Ilmu Pendidikan dan Psikologi',
+        ];
+    }
+
+    private function prodiByFaculty(): array
+    {
+        return User::query()
+            ->whereNotNull('prodi')
+            ->where('prodi', '!=', '')
+            ->get(['fakultas', 'prodi'])
+            ->groupBy('fakultas')
+            ->map(fn ($users) => $users->pluck('prodi')->unique()->values())
+            ->all();
     }
 }

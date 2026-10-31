@@ -20,3 +20,5 @@ yarn-error.log
 .env.*
 !.env.example
 /web_ujian/
+/.agents/
+skills-lock.json

@@ -2,7 +2,11 @@
 
 namespace Database\Seeders;
 
-use App\Models\{Answer, Attempt, Question, Test, User};
+use App\Models\Answer;
+use App\Models\Attempt;
+use App\Models\Question;
+use App\Models\Test;
+use App\Models\User;
 use Illuminate\Database\Seeder;
 
 class TestPilganSeeder extends Seeder
@@ -12,25 +16,33 @@ class TestPilganSeeder extends Seeder
         $dosen = User::where('role', 'dosen')->first();
         $mhs2 = User::where('email', 'mhs2@unib.ac.id')->first();
 
-        if (!$dosen) {
+        if (! $dosen || ! $mhs2) {
             $this->call(UserSeeder::class);
             $dosen = User::where('role', 'dosen')->first();
             $mhs2 = User::where('email', 'mhs2@unib.ac.id')->first();
         }
 
-        $testPilgan = Test::create([
-            'dosen_id' => $dosen->id,
-            'judul' => 'Ujian Akhir Semester: Struktur Data & Algoritma',
-            'materi' => 'Struktur Data & Algoritma',
-            'tipe_ujian' => 'pilihan_ganda',
-            'tanggal' => now()->toDateString(),
-            'jam_mulai' => '00:01',
-            'jam_selesai' => '23:59',
-            'durasi' => 60,
-            'sifat' => 'fleksibel',
-            'jumlah_soal_tampil' => 30,
-            'kkm' => 70,
-        ]);
+        if (! $dosen) {
+            throw new \RuntimeException('User dosen untuk data demo tidak ditemukan.');
+        }
+
+        $testPilgan = Test::updateOrCreate(
+            [
+                'dosen_id' => $dosen->id,
+                'judul' => 'Ujian Akhir Semester: Struktur Data & Algoritma',
+            ],
+            [
+                'materi' => 'Struktur Data & Algoritma',
+                'tipe_ujian' => 'pilihan_ganda',
+                'tanggal' => now()->toDateString(),
+                'jam_mulai' => '00:01',
+                'jam_selesai' => '23:59',
+                'durasi' => 60,
+                'sifat' => 'fleksibel',
+                'jumlah_soal_tampil' => 30,
+                'kkm' => 70,
+            ]
+        );
 
         $soalList = [
             [
@@ -438,16 +450,20 @@ class TestPilganSeeder extends Seeder
         $pilganQuestions = [];
         foreach ($soalList as $index => $item) {
             $nomor = $index + 1;
-            $q = Question::create([
-                'test_id' => $testPilgan->id,
-                'tipe' => 'pilihan_ganda',
-                'pertanyaan' => "Soal #{$nomor}: {$item['pertanyaan']}",
-                'opsi_a' => $item['opsi_a'],
-                'opsi_b' => $item['opsi_b'],
-                'opsi_c' => $item['opsi_c'],
-                'opsi_d' => $item['opsi_d'],
-                'jawaban_benar' => $item['jawaban_benar'],
-            ]);
+            $q = Question::updateOrCreate(
+                [
+                    'test_id' => $testPilgan->id,
+                    'pertanyaan' => "Soal #{$nomor}: {$item['pertanyaan']}",
+                ],
+                [
+                    'tipe' => 'pilihan_ganda',
+                    'opsi_a' => $item['opsi_a'],
+                    'opsi_b' => $item['opsi_b'],
+                    'opsi_c' => $item['opsi_c'],
+                    'opsi_d' => $item['opsi_d'],
+                    'jawaban_benar' => $item['jawaban_benar'],
+                ]
+            );
             $pilganQuestions[] = $q;
         }
 
@@ -455,47 +471,43 @@ class TestPilganSeeder extends Seeder
             // Attempt 1: Nilai 40 (< KKM 70) - Gagal (Siap Remedial)
             $subset1 = array_slice($pilganQuestions, 0, 30);
             $subsetIds1 = array_map(fn ($q) => $q->id, $subset1);
-            $attempt1 = Attempt::create([
-                'test_id' => $testPilgan->id,
-                'user_id' => $mhs2->id,
-                'started_at' => now()->subHours(2),
-                'finished_at' => now()->subHours(1)->subMinutes(15),
-                'nilai' => 40.0,
-                'question_ids' => $subsetIds1,
-            ]);
+            $attempt1 = Attempt::updateOrCreate(
+                ['test_id' => $testPilgan->id, 'user_id' => $mhs2->id, 'nilai' => 40.0],
+                [
+                    'started_at' => now()->subHours(2),
+                    'finished_at' => now()->subHours(1)->subMinutes(15),
+                    'question_ids' => $subsetIds1,
+                ]
+            );
 
             foreach ($subset1 as $idx => $q) {
                 $isCorrect = ($idx < 12);
                 $ans = $isCorrect ? $q->jawaban_benar : ($q->jawaban_benar === 'a' ? 'b' : 'a');
-                Answer::create([
-                    'attempt_id' => $attempt1->id,
-                    'question_id' => $q->id,
-                    'jawaban' => $ans,
-                    'benar' => $isCorrect,
-                ]);
+                Answer::updateOrCreate(
+                    ['attempt_id' => $attempt1->id, 'question_id' => $q->id],
+                    ['jawaban' => $ans, 'benar' => $isCorrect]
+                );
             }
 
             // Attempt 2: Nilai 80 (>= KKM 70) - Lulus
             $subset2 = array_slice($pilganQuestions, 10, 30);
             $subsetIds2 = array_map(fn ($q) => $q->id, $subset2);
-            $attempt2 = Attempt::create([
-                'test_id' => $testPilgan->id,
-                'user_id' => $mhs2->id,
-                'started_at' => now()->subMinutes(50),
-                'finished_at' => now()->subMinutes(10),
-                'nilai' => 80.0,
-                'question_ids' => $subsetIds2,
-            ]);
+            $attempt2 = Attempt::updateOrCreate(
+                ['test_id' => $testPilgan->id, 'user_id' => $mhs2->id, 'nilai' => 80.0],
+                [
+                    'started_at' => now()->subMinutes(50),
+                    'finished_at' => now()->subMinutes(10),
+                    'question_ids' => $subsetIds2,
+                ]
+            );
 
             foreach ($subset2 as $idx => $q) {
                 $isCorrect = ($idx < 24);
                 $ans = $isCorrect ? $q->jawaban_benar : ($q->jawaban_benar === 'a' ? 'b' : 'a');
-                Answer::create([
-                    'attempt_id' => $attempt2->id,
-                    'question_id' => $q->id,
-                    'jawaban' => $ans,
-                    'benar' => $isCorrect,
-                ]);
+                Answer::updateOrCreate(
+                    ['attempt_id' => $attempt2->id, 'question_id' => $q->id],
+                    ['jawaban' => $ans, 'benar' => $isCorrect]
+                );
             }
         }
     }

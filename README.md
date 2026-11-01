@@ -21,6 +21,26 @@ Laravel is a web application framework with expressive, elegant syntax. We belie
 
 Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
+## Deploy to Vercel
+
+This Laravel application can run on Vercel using the container runtime, FrankenPHP, and the root `Dockerfile`.
+
+Before deploying:
+
+1. Connect the repository to a Vercel project and select the Container preset.
+2. Add production environment variables in Vercel: `APP_KEY`, `APP_URL`, `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSLMODE`, `MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_ENCRYPTION`, `MAIL_FROM_ADDRESS`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`. Set `APP_ENV=production` and `APP_DEBUG=false`. Use a persistent external PostgreSQL database and set `SESSION_DRIVER=database`, `CACHE_STORE=database`, and `QUEUE_CONNECTION=sync`.
+3. Set the Google OAuth callback URL to `https://<your-domain>/auth/google/callback` in the Google OAuth client. The app uses that URL from `APP_URL` by default; set `GOOGLE_REDIRECT_URI` only if you need to override it.
+4. Run `php artisan migrate --force` against the production database once, from a trusted release environment. Do not run migrations at container startup.
+5. Deploy with the Vercel CLI (`vercel deploy --prod`) or import the repository in Vercel.
+
+The application currently stores uploaded avatars and question media on the local `public` disk. Vercel container storage is ephemeral, so uploads will not be durable across deployments or instances; configure persistent object storage and update the app's upload/display paths before relying on uploaded media in production. Never commit `.env` or paste secret values into chat.
+
+### CI and deployment changes
+
+GitHub Actions runs `php artisan test` on PHP 8.2 and 8.4 for pushes and pull requests using an in-memory SQLite database. Workflow-specific maintenance guidance is in `.github/instructions/ci-workflow.instructions.md`.
+
+The current deployment setup adds a FrankenPHP Docker image, Caddy configuration, Vercel container routing, and ignore rules for local files and secrets. Laravel trusts the Vercel proxy headers so generated URLs use HTTPS, and Google OAuth derives its callback from `APP_URL` unless `GOOGLE_REDIRECT_URI` overrides it. The Supabase production schema and Laravel migration records have been initialized. Production deployments are publicly accessible while preview deployments remain protected.
+
 ## Learning Laravel
 
 Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.

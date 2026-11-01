@@ -3,7 +3,7 @@
 @section('content')
 <div class="timer">Sisa waktu: <span id="t">--:--:--</span></div>
 <div class="container">
-  <h2>{{ $test->judul }}</h2><hr>
+  <div class="page-heading"><a href="{{ route('mhs.index') }}" class="back-button" aria-label="Kembali ke daftar ujian" title="Kembali ke daftar ujian"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a><h2>{{ $test->judul }}</h2></div><hr>
   <form method="POST" action="{{ route('mhs.kirim',$test) }}" id="f">@csrf
     @if($questions->isEmpty())
       <div class="alert err">Belum ada soal untuk ujian ini.</div>
@@ -45,7 +45,7 @@
           @endif
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:16px">
             <button type="button" class="btn btn-gray prev-question">Sebelumnya</button>
-            <button type="button" class="btn btn-gray mark-doubt">Tandai ragu-ragu</button>
+            <button type="button" class="btn btn-yellow mark-doubt">Tandai ragu-ragu</button>
             <button type="button" class="btn btn-blue next-question">Selanjutnya</button>
           </div>
         </section>

@@ -8,7 +8,7 @@
     <div class="avatar" style="{{ $user->avatar ? 'background-image:url('.asset('storage/'.$user->avatar).')' : '' }}"></div>
     <b>{{ $user->name }}</b><div style="color:#777;font-size:13px">{{ $user->subtitle }}</div>
   </div>
-  <h2 style="margin-top:20px">Profil</h2><hr>
+  <div class="page-heading" style="margin-top:20px"><a href="{{ route('dashboard') }}" class="back-button" aria-label="Kembali" title="Kembali"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a><h2>Profil</h2></div><hr>
   <form method="POST" action="{{ route('profil.update') }}" enctype="multipart/form-data">@csrf
     <div class="pgrid">
       <div><label>Nama</label><input name="name" value="{{ old('name',$user->name) }}" required>
@@ -23,7 +23,7 @@
         <b>Tempat, Tanggal Lahir</b>{{ $user->ttl }}</div>
     </div>
     <button class="btn btn-blue" style="margin-top:10px">Simpan Perubahan</button>
-    <a href="{{ route('dashboard') }}" class="btn btn-gray">Kembali</a>
+    <a href="{{ route('dashboard') }}" class="btn btn-blue">Kembali</a>
   </form>
 </div></div>
 @endsection

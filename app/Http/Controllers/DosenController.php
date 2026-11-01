@@ -5,6 +5,7 @@ use App\Models\Attempt;
 use App\Models\Question;
 use App\Models\Test;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class DosenController extends Controller
 {
@@ -93,9 +94,22 @@ class DosenController extends Controller
             'tipe' => 'nullable|in:pilihan_ganda,essai',
             'pertanyaan' => 'required|string',
             'media_type' => 'nullable|in:gambar,link',
-            'media_url' => 'nullable|url|max:2048|required_with:media_type',
+            'media_url' => 'nullable|required_if:media_type,link|url|max:2048',
+            'media_file' => 'nullable|required_if:media_type,gambar|image|max:5120',
         ]);
+
         $data['tipe'] = $data['tipe'] ?? $defaultTipe;
+
+        if (($data['media_type'] ?? null) === 'gambar') {
+            $data['media_url'] = Storage::disk('public')->url(
+                $r->file('media_file')->store('question-media', 'public')
+            );
+        } elseif (($data['media_type'] ?? null) === 'link') {
+            $data['media_url'] = $data['media_url'] ?? null;
+        }
+
+unset($data['media_file']);
+
         if ($data['tipe'] === 'pilihan_ganda') {
             $data = array_merge($data, $r->validate([
                 'opsi_a' => 'required|string|max:255',
@@ -117,6 +131,9 @@ class DosenController extends Controller
     public function soalDestroy(Test $test, Question $question)
     {
         abort_unless($question->test_id === $this->own($test)->id, 404);
+        if ($question->media_type === 'gambar' && str_starts_with($question->media_url ?? '', '/storage/')) {
+            Storage::disk('public')->delete(substr($question->media_url, strlen('/storage/')));
+        }
         $question->delete();
         return back()->with('ok', 'Soal dihapus.');
     }

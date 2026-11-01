@@ -22,3 +22,5 @@ yarn-error.log
 /web_ujian/
 /.agents/
 skills-lock.json
+
+.vercel

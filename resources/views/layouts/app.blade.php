@@ -22,15 +22,31 @@ hr{border:0;border-top:1px solid #ddd;margin:8px 0 16px}
 .card .body{padding:14px 16px;font-size:14px;line-height:1.7}
 .card .body b{font-size:15px;display:block;margin-bottom:6px}
 .card .foot{display:flex;border-top:1px solid #e5e5e5;padding:8px 14px;gap:8px;justify-content:space-between;align-items:center}
-.card .foot.split>*{flex:1;text-align:center}
+.card .foot.actions{justify-content:flex-end}
+.card .foot form{margin:0}
+.card .foot.split{justify-content:space-between}
+.card .foot.split>*{flex:initial;text-align:center}
 .btn{display:inline-block;border:0;border-radius:4px;padding:6px 14px;color:#fff;font-size:13px;cursor:pointer;font-family:inherit}
-.btn-blue{background:#3182e0}.btn-red{background:#e0393e}.btn-green{background:#5cd24a}.btn-gray{background:#999}
+.btn-blue,.btn-gray{background:#3182e0}.btn-red{background:#e0393e}.btn-green{background:#5cd24a}.btn-yellow{background:#f2c94c;color:#111}
 .btn,.btn-pill,.plus,.tabs a,button{transition:background-color .2s ease,color .2s ease,border-color .2s ease,filter .2s ease,transform .2s ease}
 .btn:hover,.btn-pill:hover,.plus:hover,.tabs a:hover,button:hover{filter:brightness(.9);transform:translateY(-1px)}
 .btn:focus-visible,.btn-pill:focus-visible,.plus:focus-visible,.tabs a:focus-visible,button:focus-visible{outline:3px solid rgba(49,130,224,.35);outline-offset:2px}
 .btn.off{opacity:.45;pointer-events:none}
-.plus{width:30px;height:30px;border-radius:50%;background:#3182e0;color:#fff;font-size:22px;display:inline-flex;align-items:center;justify-content:center}
+.plus{width:42px;height:42px;flex:0 0 42px;padding:0;border:0;border-radius:50%;background:#3182e0;color:#fff;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(29,43,107,.2)}
+.plus span{position:relative;width:16px;height:16px;display:block}
+.plus span:before,.plus span:after{content:'';position:absolute;top:50%;left:50%;background:#fff;border-radius:2px;transform:translate(-50%,-50%)}
+.plus span:before{width:16px;height:2px}
+.plus span:after{width:2px;height:16px}
+.back-button{width:42px;height:42px;flex:0 0 42px;padding:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#fff;color:#1d2b6b;border:1px solid #d8e3f3;box-shadow:0 2px 6px rgba(29,43,107,.12)}
+.back-button svg{display:block;width:20px;height:20px;flex:none}
+.plus:hover{background:#246bc1;filter:none;box-shadow:0 5px 12px rgba(29,43,107,.28);transform:translateY(-2px)}
+.back-button:hover{background:#eaf2ff;color:#185ca8;border-color:#a9c7ef;filter:none;box-shadow:0 4px 10px rgba(29,43,107,.2);transform:translateY(-2px)}
+.plus:active,.back-button:active{transform:translateY(0) scale(.96)}
+.plus:focus-visible,.back-button:focus-visible{outline:3px solid rgba(49,130,224,.35);outline-offset:3px}
+.page-heading{display:flex;align-items:center;gap:14px;min-width:0}
+.page-heading h2{margin:0;line-height:1.3}
 .row{display:flex;justify-content:space-between;align-items:center}
+.row>h2{margin:0}
 .tabs{display:flex;gap:10px;margin-bottom:20px}
 .tabs a{padding:7px 22px;border-radius:20px;font-size:14px}
 .tabs a.active{background:#3182e0;color:#fff}
@@ -56,7 +72,7 @@ th,td{padding:10px 12px;border-bottom:1px solid #eee;text-align:left}th{backgrou
 .opt input{width:auto;margin-right:8px}
 .timer{position:sticky;top:0;background:#1d2b6b;color:#fff;padding:10px 20px;text-align:center;font-weight:700;z-index:5}
 .good{background:#e3f6df}.bad{background:#fde4e4}
-@media(max-width:700px){.pgrid{grid-template-columns:1fr}.topbar{padding:10px 14px}}
+@media(max-width:700px){.pgrid{grid-template-columns:1fr}.topbar{padding:10px 14px}.plus,.back-button{width:44px;height:44px;flex-basis:44px}.page-heading{gap:10px}}
 </style>
 </head>
 <body>

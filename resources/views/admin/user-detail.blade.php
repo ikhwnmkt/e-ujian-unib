@@ -4,10 +4,9 @@
 <div class="container">
   @if(session('ok'))<div class="alert ok">{{ session('ok') }}</div>@endif
   <div class="row">
-    <h2>Detail {{ ucfirst($role) }}</h2>
+    <div class="page-heading"><a href="{{ route('admin.users', $role) }}" class="back-button" aria-label="Kembali" title="Kembali"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a><h2>Detail {{ ucfirst($role) }}</h2></div>
     <div style="display:flex;gap:8px">
       <a href="{{ route('admin.users.edit', [$role, $user]) }}" class="btn btn-blue">Edit</a>
-      <a href="{{ route('admin.users', $role) }}" class="btn btn-gray">Kembali</a>
     </div>
   </div><hr>
   <div class="panel pgrid">

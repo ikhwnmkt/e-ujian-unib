@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+.phpunit.cache
+.phpunit.result.cache
+auth.json
+bootstrap/cache/*.php
+database/*.sqlite
+node_modules
+public/storage
+storage/app/public
+storage/framework
+storage/logs
+tests
+vendor
+web_ujian

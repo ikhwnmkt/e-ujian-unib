@@ -107,7 +107,16 @@ class AuthController extends Controller
 
     public function googleCallback(Request $r)
     {
-        $g = Socialite::driver('google')->user();
+        try {
+            $g = Socialite::driver('google')->user();
+        } catch (\Laravel\Socialite\Two\InvalidStateException $e) {
+            $g = Socialite::driver('google')->stateless()->user();
+        } catch (\Throwable $e) {
+            return redirect()->route('login')->withErrors([
+                'email' => 'Gagal autentikasi Google: ' . $e->getMessage(),
+            ]);
+        }
+
         $email = $g->getEmail();
 
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -200,42 +209,6 @@ class AuthController extends Controller
             ->where('user_id', $user->id)
             ->where('id', '!=', $r->session()->getId())
             ->delete();
-
-        return redirect()->route('dashboard');
-
-        if ($user->role === 'mahasiswa') {
-            $activeAttempts = Attempt::with('test')
-                ->where('user_id', $user->id)
-                ->whereNull('finished_at')
-                ->get();
-
-            $hasActiveExam = $activeAttempts->contains(function ($attempt) {
-                return $attempt->test && $attempt->test->berlangsung();
-            });
-
-            if ($hasActiveExam) {
-                $cutoff = now()->subMinutes((int) config('session.lifetime', 120))->timestamp;
-                $activeOtherSession = DB::table('sessions')
-                    ->where('user_id', $user->id)
-                    ->where('id', '!=', request()->session()->getId())
-                    ->where('last_activity', '>=', $cutoff)
-                    ->exists();
-
-                if ($activeOtherSession) {
-                    return redirect()->route('login')->withErrors([
-                        'email' => 'Akun Anda sedang aktif mengikuti ujian di perangkat lain. Dilarang login multi-device selama ujian berlangsung.',
-                    ]);
-                }
-            }
-        }
-
-        DB::table('sessions')
-            ->where('user_id', $user->id)
-            ->where('id', '!=', request()->session()->getId())
-            ->delete();
-
-        Auth::login($user);
-        $r->session()->regenerate();
 
         return redirect()->route('dashboard');
     }

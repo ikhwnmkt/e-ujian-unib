@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('dosen_id')->index()->constrained('users')->cascadeOnDelete();
             $table->string('judul');
+            $table->string('mata_kuliah')->nullable();
             $table->string('materi')->nullable();
             $table->date('tanggal');
             $table->time('jam_mulai');

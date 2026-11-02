@@ -25,6 +25,7 @@ return new class extends Migration
             $table->string('status')->default('aktif');
             $table->string('fakultas')->default('Teknik');
             $table->string('prodi')->default('Pendidikan Teknik Informatika dan Komputer');
+            $table->string('kelas')->nullable();
             $table->string('avatar')->nullable();
             $table->rememberToken();
             $table->timestamps();

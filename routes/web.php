@@ -20,6 +20,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/profil', [ProfileController::class, 'show'])->name('profil');
     Route::post('/profil', [ProfileController::class, 'update'])->name('profil.update');
 
+    // Broadcasting routes untuk WebSocket authentication
+    \Illuminate\Support\Facades\Broadcast::routes();
+
     Route::get('/', fn () => redirect()->route('dashboard'));
     Route::get('/dashboard', fn () => redirect()->route(match (auth()->user()->role) {
         'admin' => 'admin.index', 'dosen' => 'dosen.index', default => 'mhs.index',

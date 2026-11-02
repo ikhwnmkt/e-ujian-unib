@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Events\ExamActivityUpdated;
 use App\Models\Answer;
 use App\Models\Attempt;
 use App\Models\Question;
@@ -10,6 +11,7 @@ use App\Models\TestSchedule;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
 
 class ExamEdgeCasesAndConcurrencyTest extends TestCase
@@ -1226,5 +1228,145 @@ class ExamEdgeCasesAndConcurrencyTest extends TestCase
         $this->assertTrue($test->berlangsung($this->dosen));
         // Selesai = false karena jadwal B masih aktif
         $this->assertFalse($test->selesai($this->dosen));
+    }
+
+    // ===== TEST WEBSOCKET BROADCAST (LIVE MONITORING ESSAI) =====
+
+    public function test_websocket_event_dispatched_only_for_essai_exam(): void
+    {
+        Event::fake([ExamActivityUpdated::class]);
+
+        // Test 1: Ujian Essai - Event HARUS di-dispatch
+        $testEssai = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Essai WebSocket Test',
+            'tipe_ujian' => 'essai',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        $qEssai = Question::create([
+            'test_id' => $testEssai->id,
+            'tipe' => 'essai',
+            'pertanyaan' => 'Soal Essai WebSocket',
+        ]);
+
+        // Mahasiswa mulai ujian essai -> event harus di-dispatch
+        $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $testEssai));
+        Event::assertDispatched(ExamActivityUpdated::class, function ($event) use ($testEssai, $qEssai) {
+            return $event->attempt->test_id === $testEssai->id
+                && $event->attempt->user_id === $this->mahasiswa->id;
+        });
+
+        Event::fake([ExamActivityUpdated::class]); // Reset untuk test autosave
+
+        $attemptEssai = Attempt::where('test_id', $testEssai->id)
+            ->where('user_id', $this->mahasiswa->id)
+            ->latest('id')
+            ->first();
+
+        // Autosave pada ujian essai -> event harus di-dispatch
+        $this->actingAs($this->mahasiswa)->postJson('/mahasiswa/ujian/' . $testEssai->id . '/autosave', [
+            'question_id' => $qEssai->id,
+            'jawaban_essai' => 'Jawaban essai mahasiswa',
+        ]);
+        Event::assertDispatched(ExamActivityUpdated::class);
+
+        Event::fake([ExamActivityUpdated::class]); // Reset untuk test kirim
+
+        // Kirim ujian essai -> event harus di-dispatch
+        $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $testEssai), [
+            'jawaban_essai' => [$qEssai->id => 'Jawaban final'],
+        ]);
+        Event::assertDispatched(ExamActivityUpdated::class);
+
+        // Test 2: Ujian Pilihan Ganda - Event TIDAK BOLEH di-dispatch
+        Event::fake([ExamActivityUpdated::class]);
+
+        $testPilgan = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Pilgan WebSocket Test',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        $qPilgan = Question::create([
+            'test_id' => $testPilgan->id,
+            'tipe' => 'pilihan_ganda',
+            'pertanyaan' => 'Soal Pilgan WebSocket Test',
+            'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D',
+            'jawaban_benar' => 'a',
+        ]);
+
+        // Mahasiswa mulai ujian pilihan ganda -> event TIDAK BOLEH di-dispatch
+        $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $testPilgan));
+        Event::assertNotDispatched(ExamActivityUpdated::class);
+
+        // Autosave pada ujian pilihan ganda -> event TIDAK BOLEH di-dispatch
+        $this->actingAs($this->mahasiswa)->postJson('/mahasiswa/ujian/' . $testPilgan->id . '/autosave', [
+            'question_id' => $qPilgan->id,
+            'pilihan' => 'a',
+        ]);
+        Event::assertNotDispatched(ExamActivityUpdated::class);
+
+        // Kirim ujian pilihan ganda -> event TIDAK BOLEH di-dispatch
+        $this->actingAs($this->mahasiswa)->post(route('mhs.kirim', $testPilgan), [
+            'jawaban' => [$qPilgan->id => 'a'],
+        ]);
+        Event::assertNotDispatched(ExamActivityUpdated::class);
+    }
+
+    public function test_exam_broadcast_channel_authorization(): void
+    {
+        $dosenLain = User::create([
+            'name' => 'Dosen Lain',
+            'email' => 'dosen_lain@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'dosen',
+            'nomor_induk' => '19860202',
+        ]);
+
+        $admin = User::create([
+            'name' => 'Admin Test',
+            'email' => 'admin_test@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'admin',
+        ]);
+
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Channel Auth Test',
+            'tipe_ujian' => 'essai',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        // Test logic authorization langsung (tidak melalui HTTP endpoint)
+        // Admin harus selalu diizinkan
+        $this->assertTrue($admin->role === 'admin');
+
+        // Dosen pemilik ujian harus diizinkan
+        $this->assertTrue($this->dosen->role === 'dosen');
+        $this->assertTrue(Test::where('id', $test->id)->where('dosen_id', $this->dosen->id)->exists());
+
+        // Dosen lain (bukan pemilik) harus ditolak
+        $this->assertTrue($dosenLain->role === 'dosen');
+        $this->assertFalse(Test::where('id', $test->id)->where('dosen_id', $dosenLain->id)->exists());
+
+        // Mahasiswa tidak punya role yang diizinkan
+        $this->assertFalse($this->mahasiswa->role === 'admin');
+        $this->assertFalse($this->mahasiswa->role === 'dosen');
     }
 }

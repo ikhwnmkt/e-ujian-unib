@@ -1,6 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 
+use App\Events\ExamActivityUpdated;
 use App\Models\Answer;
 use App\Models\Attempt;
 use App\Models\Test;
@@ -129,6 +130,16 @@ class MahasiswaController extends Controller
         }
 
         $attempt = $result;
+        
+        // Trigger WebSocket event untuk ujian essai
+        if ($test->isEssai()) {
+            try {
+                ExamActivityUpdated::dispatch($attempt);
+            } catch (\Throwable $e) {
+                // Silent fail - tidak mengganggu flow ujian mahasiswa
+            }
+        }
+        
         $deadline = $this->deadline($attempt, $test);
 
         if (!empty($attempt->question_ids) && is_array($attempt->question_ids)) {
@@ -224,6 +235,15 @@ class MahasiswaController extends Controller
         );
 
         $attempt->touch();
+
+        // Trigger WebSocket event untuk ujian essai
+        if ($test->isEssai()) {
+            try {
+                ExamActivityUpdated::dispatch($attempt);
+            } catch (\Throwable $e) {
+                // Silent fail - tidak mengganggu autosave mahasiswa
+            }
+        }
 
         return response()->json([
             'status' => 'saved',
@@ -338,6 +358,15 @@ class MahasiswaController extends Controller
             'nilai' => $nilai,
         ]);
 
+        // Trigger WebSocket event untuk ujian essai
+        if ($test->isEssai()) {
+            try {
+                ExamActivityUpdated::dispatch($attempt);
+            } catch (\Throwable $e) {
+                // Silent fail - tidak mengganggu submit ujian mahasiswa
+            }
+        }
+
         return redirect()->route('mhs.hasil', $test);
     }
 
@@ -390,6 +419,15 @@ class MahasiswaController extends Controller
             'finished_at' => $deadline,
             'nilai' => $nilai,
         ]);
+
+        // Trigger WebSocket event untuk ujian essai
+        if ($test->isEssai()) {
+            try {
+                ExamActivityUpdated::dispatch($attempt);
+            } catch (\Throwable $e) {
+                // Silent fail - tidak mengganggu finalize attempt
+            }
+        }
     }
 
     private function deadline(Attempt $attempt, Test $test): Carbon

@@ -260,6 +260,17 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
   - **Akses Browser (HTML)**: Dosen langsung disajikan halaman visual Live Monitoring dengan dashboard realtime, counter peserta, dan polling otomatis setiap 3 detik.
   - **Akses AJAX/JSON**: Mengembalikan payload JSON near real-time untuk komponen frontend / polling JavaScript.
 - **Deduplikasi**: Mahasiswa yang remedial **hanya muncul 1 kali** (mengambil attempt paling mutakhir / `latest('id')`), dengan penanda `attempt_count`.
+- **WebSocket Real-Time untuk Ujian Essai** *(Baru)*:
+  - **HANYA ujian bertipe `essai`** yang mendukung broadcast WebSocket real-time via Laravel Broadcasting.
+  - Backend men-trigger event `ExamActivityUpdated` ke Private Channel `exam.{testId}` dengan nama event `.activity.updated` saat mahasiswa:
+    1. Mulai ujian essai (`mhs.mulai`)
+    2. Autosave jawaban essai (`mhs.autosave`)
+    3. Submit ujian essai (`mhs.kirim`)
+  - **Otorisasi Channel `exam.{testId}`** (`routes/channels.php`): Hanya **Admin** atau **Dosen pemilik ujian** yang diizinkan subscribe (mahasiswa dan dosen lain ditolak `return false`).
+  - **Fallback & Initial State**: Endpoint `GET /dosen/ujian/{test}/live-monitoring` tetap berfungsi sebagai:
+    - **Initial state loader** saat halaman monitoring pertama kali dibuka (sebelum WebSocket connection established).
+    - **Fallback polling** untuk ujian pilihan ganda atau jika koneksi WebSocket gagal.
+  - **UI Frontend**: Tombol/tab **Live Monitoring** dapat ditampilkan hanya pada ujian `$test->isEssai()` untuk pengalaman monitoring real-time via WebSocket. Ujian pilihan ganda tetap menggunakan polling 3 detik.
 - **Query Params Filter** *(Baru)*:
   - `?prodi=Informatika` — filter peserta berdasarkan prodi mahasiswa.
   - `?kelas=A` — filter peserta berdasarkan kelas mahasiswa.
@@ -367,6 +378,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Kegunaan**:
   - **Pilihan Ganda**: Menyimpan pilihan radio button (A/B/C/D) secara instan saat opsi diklik mahasiswa, sekaligus menghitung status kebenaran (`benar`) di DB. Jika waktu ujian habis tanpa menekan tombol "Kirim", nilai akhir dihitung dari data yang tersimpan di DB ini (`finalizeAttempt`).
   - **Essai**: Menyimpan ketikan jawaban essai secara live untuk monitoring dosen.
+- **Debounce untuk Essai**: Frontend **WAJIB** menerapkan debounce **1000ms (1 detik)** setelah perubahan terakhir pada `<textarea>` sebelum mengirim request `autosave` untuk soal essai. Tujuannya: mencegah flooding request saat mahasiswa sedang mengetik cepat.
 - **Request Headers**:
   - `Content-Type: application/json`
   - `X-CSRF-TOKEN`: nilai token CSRF

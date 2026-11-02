@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\{Answer, Attempt, Question, Test, User};
+use App\Models\{Answer, Attempt, Question, Test, TestSchedule, User};
 use Illuminate\Database\Seeder;
 
 class TestEssaiSeeder extends Seeder
@@ -20,9 +20,13 @@ class TestEssaiSeeder extends Seeder
             $mhs3 = User::where('email', 'mhs3@unib.ac.id')->first();
         }
 
+        // Hapus test essai demo sebelumnya jika ada agar idempotent saat re-seed
+        Test::where('judul', 'Ujian Tengah Semester: Analisis Kompleksitas Algoritma')->delete();
+
         $testEssai = Test::create([
             'dosen_id' => $dosen->id,
             'judul' => 'Ujian Tengah Semester: Analisis Kompleksitas Algoritma',
+            'mata_kuliah' => 'Analisis Kompleksitas Algoritma',
             'materi' => 'Analisis Kompleksitas Algoritma',
             'tipe_ujian' => 'essai',
             'tanggal' => now()->toDateString(),
@@ -32,6 +36,24 @@ class TestEssaiSeeder extends Seeder
             'sifat' => 'fleksibel',
             'jumlah_soal_tampil' => 5,
             'kkm' => 70,
+        ]);
+
+        // Jadwal per kelas
+        TestSchedule::create([
+            'test_id' => $testEssai->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:01',
+            'jam_selesai' => '23:59',
+        ]);
+        TestSchedule::create([
+            'test_id' => $testEssai->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'B',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:01',
+            'jam_selesai' => '23:59',
         ]);
 
         $essaiQuestions = [

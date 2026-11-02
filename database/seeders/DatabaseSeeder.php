@@ -12,6 +12,7 @@ class DatabaseSeeder extends Seeder
             UserSeeder::class,
             TestPilganSeeder::class,
             TestEssaiSeeder::class,
+            TestBesokSeeder::class,
         ]);
     }
 }

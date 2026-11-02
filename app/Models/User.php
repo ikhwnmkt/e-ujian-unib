@@ -8,7 +8,18 @@ class User extends Authenticatable
 {
     use Notifiable;
 
-    protected $fillable = ['name','email','password','role','nomor_induk','tempat_lahir','tanggal_lahir','no_hp','status','fakultas','prodi','avatar'];
+    public const KELAS_LIST = ['A', 'B', 'C', 'D', 'E'];
+    public const PRODI_LIST = [
+        'Pendidikan Teknik Informatika dan Komputer',
+        'Informatika',
+        'Sistem Informasi',
+        'Teknik Elektro',
+        'Teknik Mesin',
+        'Teknik Sipil',
+        'Arsitektur',
+    ];
+
+    protected $fillable = ['name','email','password','role','nomor_induk','tempat_lahir','tanggal_lahir','no_hp','status','fakultas','prodi','kelas','avatar'];
     protected $hidden = ['password','remember_token'];
 
     protected function casts(): array {
@@ -17,6 +28,14 @@ class User extends Authenticatable
 
     public function tests() { return $this->hasMany(Test::class, 'dosen_id'); }
     public function attempts() { return $this->hasMany(Attempt::class); }
+
+    public function getProdiKelasAttribute(): string {
+        $kelas = $this->kelas ? 'Kelas ' . $this->kelas : null;
+        if ($this->prodi && $kelas) {
+            return "{$this->prodi} - {$kelas}";
+        }
+        return $kelas ?: ($this->prodi ?: '-');
+    }
 
     public function getSubtitleAttribute(): string {
         return match ($this->role) {

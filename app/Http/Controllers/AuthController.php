@@ -88,6 +88,8 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users',
             'nomor_induk' => 'required|string|max:30',
             'role' => 'required|in:mahasiswa,dosen',
+            'prodi' => 'nullable|string|max:255',
+            'kelas' => 'nullable|string|max:10',
             'password' => 'required|min:6|confirmed',
         ]);
         Auth::login(User::create($data));

@@ -14,6 +14,8 @@ class ProfileController extends Controller
             'tempat_lahir' => 'nullable|string|max:100',
             'tanggal_lahir' => 'nullable|date',
             'no_hp' => 'nullable|string|max:20',
+            'prodi' => 'nullable|string|max:255',
+            'kelas' => 'nullable|string|max:10',
             'avatar' => 'nullable|image|max:2048',
         ]);
         if ($r->hasFile('avatar')) {

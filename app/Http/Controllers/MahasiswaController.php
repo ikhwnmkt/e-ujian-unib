@@ -13,7 +13,10 @@ class MahasiswaController extends Controller
 {
     public function index()
     {
-        $tests = Test::orderByDesc('tanggal')->get();
+        $tests = Test::with('schedules')->orderByDesc('tanggal')->get()
+            ->filter(fn ($t) => $t->isAccessibleBy(auth()->user()))
+            ->values();
+
         $attempts = Attempt::where('user_id', auth()->id())
             ->orderBy('id')
             ->get()
@@ -39,6 +42,10 @@ class MahasiswaController extends Controller
 
     public function mulai(Test $test)
     {
+        if (!$test->isAccessibleBy(auth()->user())) {
+            return redirect()->route('dashboard')->with('err', 'Ujian ini tidak diperuntukkan bagi program studi atau kelas Anda.');
+        }
+
         $userId = auth()->id();
 
         $result = DB::transaction(function () use ($test, $userId) {
@@ -144,6 +151,13 @@ class MahasiswaController extends Controller
 
     public function autosave(Request $r, Test $test)
     {
+        if (!$test->isAccessibleBy(auth()->user())) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ujian ini tidak diperuntukkan bagi program studi atau kelas Anda.',
+            ], 403);
+        }
+
         $attempt = Attempt::where('test_id', $test->id)
             ->where('user_id', auth()->id())
             ->latest('id')
@@ -219,11 +233,19 @@ class MahasiswaController extends Controller
 
     public function remedial(Request $r, Test $test)
     {
+        if (!$test->isAccessibleBy(auth()->user())) {
+            return redirect()->route('dashboard')->with('err', 'Ujian ini tidak diperuntukkan bagi program studi atau kelas Anda.');
+        }
+
         return redirect()->route('mhs.mulai', $test);
     }
 
     public function kirim(Request $r, Test $test)
     {
+        if (!$test->isAccessibleBy(auth()->user())) {
+            abort(403, 'Ujian ini tidak diperuntukkan bagi program studi atau kelas Anda.');
+        }
+
         $attempt = Attempt::where('test_id', $test->id)
             ->where('user_id', auth()->id())
             ->latest('id')
@@ -373,8 +395,15 @@ class MahasiswaController extends Controller
     private function deadline(Attempt $attempt, Test $test): Carbon
     {
         $deadline = $attempt->started_at->copy()->addMinutes($test->durasi);
-        if ($test->sifat === 'ketat' && $test->selesai_at->lt($deadline)) {
-            $deadline = $test->selesai_at;
+        $selesaiAt = $test->selesai_at;
+        if ($test->schedules->isNotEmpty()) {
+            $sch = $test->scheduleFor($attempt->user ?? auth()->user());
+            if ($sch) {
+                $selesaiAt = $sch->selesai_at;
+            }
+        }
+        if ($test->sifat === 'ketat' && $selesaiAt->lt($deadline)) {
+            $deadline = $selesaiAt;
         }
         return $deadline;
     }

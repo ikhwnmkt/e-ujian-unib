@@ -106,6 +106,7 @@ class AdminController extends Controller
             'no_hp' => ['nullable', 'string', 'max:30'],
             'fakultas' => ['required', Rule::in($this->faculties())],
             'prodi' => ['required', 'string', 'max:255'],
+            'kelas' => ['nullable', 'string', 'max:10'],
             'tempat_lahir' => ['nullable', 'string', 'max:255'],
             'tanggal_lahir' => ['nullable', 'date'],
             'status' => ['required', Rule::in(['aktif', 'nonaktif'])],

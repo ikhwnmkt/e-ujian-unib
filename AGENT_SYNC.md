@@ -574,6 +574,9 @@ DB_DATABASE=ujian_unib
 DB_USERNAME=root
 DB_PASSWORD=1234
 SESSION_DRIVER=database
+
+# Broadcasting: "log" untuk dev/testing (tanpa WebSocket server)
+BROADCAST_CONNECTION=log
 ```
 
 #### `.env.testing` (Test Runner - TIDAK di git)
@@ -585,10 +588,179 @@ DB_DATABASE=ujian_unib_test   # ← DB terpisah untuk test
 DB_USERNAME=root
 DB_PASSWORD=1234
 SESSION_DRIVER=array
+BROADCAST_CONNECTION=log       # ← WAJIB "log" untuk fast testing
+```
+
+#### `.env` Production (untuk deployment dengan WebSocket real-time)
+```env
+APP_URL=https://your-domain.com
+APP_KEY=base64:...
+DB_CONNECTION=pgsql
+# ... (database credentials)
+
+# WebSocket Real-Time dengan Laravel Reverb
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=your-app-id
+REVERB_APP_KEY=your-app-key
+REVERB_APP_SECRET=your-app-secret
+REVERB_HOST=your-domain.com
+REVERB_PORT=443
+REVERB_SCHEME=https
+
+# Vite Environment Variables (untuk client-side WebSocket)
+VITE_REVERB_APP_KEY="${REVERB_APP_KEY}"
+VITE_REVERB_HOST="${REVERB_HOST}"
+VITE_REVERB_PORT="${REVERB_PORT}"
+VITE_REVERB_SCHEME="${REVERB_SCHEME}"
+
+QUEUE_CONNECTION=database
 ```
 
 > **PENTING untuk Developer Baru**: Setelah clone repo:
 > 1. Copy `.env.example` → `.env`, sesuaikan `APP_URL` dengan path subfolder Laragon
+> 2. Set `BROADCAST_CONNECTION=log` untuk development lokal (WebSocket hanya simulasi log)
+> 3. Buat `.env.testing` seperti template di atas dengan `DB_DATABASE=ujian_unib_test` dan `APP_URL=http://localhost`
+> 4. Buat database test: `CREATE DATABASE ujian_unib_test;`
+> 5. Jalankan `php artisan migrate --env=testing`
+> 6. Jalankan `php artisan migrate:fresh --seed` untuk seed data development
+
+---
+
+## 🚀 Deployment Production dengan WebSocket
+
+### Opsi 1: Laravel Reverb (Self-Hosted WebSocket Server)
+
+**Kebutuhan Infrastructure:**
+1. **Server WebSocket Terpisah** atau **Container Reverb** yang berjalan paralel dengan aplikasi utama
+2. **Port Terbuka**: Port 8080 (atau custom) untuk Reverb server
+3. **Reverse Proxy**: Nginx/Caddy untuk routing WebSocket `/app` ke Reverb server
+
+**Setup Docker Compose untuk Reverb:**
+```yaml
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "80:80"
+    environment:
+      BROADCAST_CONNECTION: reverb
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+    depends_on:
+      - reverb
+
+  reverb:
+    image: quay.io/soketi/soketi:latest-16-alpine
+    ports:
+      - "8080:6001"
+    environment:
+      SOKETI_DEFAULT_APP_ID: your-app-id
+      SOKETI_DEFAULT_APP_KEY: your-app-key
+      SOKETI_DEFAULT_APP_SECRET: your-app-secret
+      SOKETI_ADAPTER_DRIVER: memory
+```
+
+**Catatan**: Laravel Reverb berbasis Soketi (WebSocket server ringan kompatibel dengan Pusher protocol).
+
+### Opsi 2: Pusher (SaaS - Tanpa Infrastructure WebSocket)
+
+**Keunggulan:**
+- ✅ Tidak perlu maintain WebSocket server sendiri
+- ✅ Auto-scaling
+- ✅ Free tier: 100 concurrent connections, 200k messages/day
+
+**Setup `.env` Production:**
+```env
+BROADCAST_CONNECTION=pusher
+PUSHER_APP_ID=your-pusher-app-id
+PUSHER_APP_KEY=your-pusher-key
+PUSHER_APP_SECRET=your-pusher-secret
+PUSHER_APP_CLUSTER=ap1  # Asia Pacific 1 (Singapore)
+
+VITE_REVERB_APP_KEY="${PUSHER_APP_KEY}"
+VITE_REVERB_HOST="${PUSHER_APP_CLUSTER}.pusher.com"
+VITE_REVERB_PORT=443
+VITE_REVERB_SCHEME=https
+```
+
+**Signup Pusher**: https://pusher.com/channels
+
+### Opsi 3: Development/Testing Tanpa WebSocket (Fallback Polling)
+
+Jika infrastruktur WebSocket belum siap, aplikasi tetap berfungsi dengan **polling fallback**:
+- Set `BROADCAST_CONNECTION=log` di `.env`
+- Frontend otomatis fallback ke polling tiap 3 detik
+- Tidak ada fitur real-time, tapi monitoring tetap berjalan
+
+---
+
+## 📦 Build & Deployment Checklist
+
+### Pre-Deployment
+- [ ] `npm install` → install `laravel-echo` dan `pusher-js`
+- [ ] `npm run build` → compile Vite assets dengan WebSocket client
+- [ ] Set environment variables WebSocket di platform hosting
+- [ ] Test WebSocket connection dengan `php artisan reverb:start` (jika self-hosted)
+
+### Deployment ke Vercel/Netlify (Static Frontend)
+**CATATAN**: Vercel/Netlify adalah static hosting, **TIDAK BISA** hosting Laravel backend atau WebSocket server.
+
+**Arsitektur yang Benar:**
+1. **Backend Laravel** → Deploy ke **Railway** / **Fly.io** / **DigitalOcean App Platform** / **Heroku**
+2. **Frontend Blade** → Rendered server-side oleh Laravel (bukan static hosting)
+3. **WebSocket** → Pusher (SaaS) atau Reverb (di container terpisah)
+
+### Deployment ke Railway (Recommended untuk Laravel + WebSocket)
+
+**Setup `railway.toml`:**
+```toml
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "php artisan reverb:start & frankenphp run"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+```
+
+**Environment Variables di Railway:**
+```
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=railway-app
+REVERB_APP_KEY=railway-key
+REVERB_APP_SECRET=railway-secret
+REVERB_HOST=${{RAILWAY_PUBLIC_DOMAIN}}
+REVERB_PORT=443
+REVERB_SCHEME=https
+```
+
+---
+
+## 🧪 Testing WebSocket di Development
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Start Reverb server (terminal 1)
+php artisan reverb:start
+
+# 3. Start Laravel server (terminal 2)
+php artisan serve
+
+# 4. Buka browser: http://localhost:8000/dosen
+# 5. Login sebagai dosen, buka Live Monitoring ujian essai
+# 6. Buka tab baru sebagai mahasiswa, mulai ujian essai
+# 7. Ketik di textarea essai → lihat update real-time di tab dosen
+```
+
+**Troubleshooting:**
+- Jika WebSocket tidak connect → Periksa browser console, pastikan `window.Echo` ter-define
+- Jika fallback ke polling → Normal, berarti Reverb belum jalan atau `BROADCAST_CONNECTION=log`
+
+---
 > 2. Buat `.env.testing` seperti template di atas dengan `DB_DATABASE=ujian_unib_test` dan `APP_URL=http://localhost`
 > 3. Buat database test: `CREATE DATABASE ujian_unib_test;`
 > 4. Jalankan `php artisan migrate --env=testing`

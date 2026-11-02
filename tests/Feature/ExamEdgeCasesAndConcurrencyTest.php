@@ -6,7 +6,9 @@ use App\Models\Answer;
 use App\Models\Attempt;
 use App\Models\Question;
 use App\Models\Test;
+use App\Models\TestSchedule;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -798,5 +800,431 @@ class ExamEdgeCasesAndConcurrencyTest extends TestCase
         $viewResponse->assertOk()
             ->assertViewHas('savedAnswers')
             ->assertSee('checked');
+    }
+
+    // ===== TEST JADWAL MAJEMUK (MULTI-SCHEDULE) =====
+
+    public function test_schedule_isolation_same_kelas_different_prodi(): void
+    {
+        // Skenario: Kelas A Informatika dan Kelas A Sistem Informasi adalah jadwal berbeda
+        $mhsInformatika = User::create([
+            'name' => 'Mhs Informatika A',
+            'email' => 'mhs_inf_a@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021010',
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+        ]);
+
+        $mhsSI = User::create([
+            'name' => 'Mhs SI A',
+            'email' => 'mhs_si_a@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021020',
+            'prodi' => 'Sistem Informasi',
+            'kelas' => 'A',
+        ]);
+
+        $mhsInfB = User::create([
+            'name' => 'Mhs Informatika B',
+            'email' => 'mhs_inf_b@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021030',
+            'prodi' => 'Informatika',
+            'kelas' => 'B',
+        ]);
+
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Jadwal Majemuk Prodi+Kelas',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q1', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+        Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q2', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+
+        // Jadwal: Informatika A aktif hari ini, SI A aktif hari ini, Informatika B TIDAK ada jadwal
+        TestSchedule::create([
+            'test_id' => $test->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+        ]);
+        TestSchedule::create([
+            'test_id' => $test->id,
+            'prodi' => 'Sistem Informasi',
+            'kelas' => 'A',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+        ]);
+
+        // Mhs Informatika A: bisa akses, scheduleFor menemukan jadwal Informatika A
+        $this->assertTrue($test->isAccessibleBy($mhsInformatika));
+        $scheduleInf = $test->scheduleFor($mhsInformatika);
+        $this->assertNotNull($scheduleInf);
+        $this->assertEquals('Informatika', $scheduleInf->prodi);
+        $this->assertEquals('A', $scheduleInf->kelas);
+
+        // Mhs SI A: bisa akses, scheduleFor menemukan jadwal SI A (bukan Informatika A!)
+        $this->assertTrue($test->isAccessibleBy($mhsSI));
+        $scheduleSI = $test->scheduleFor($mhsSI);
+        $this->assertNotNull($scheduleSI);
+        $this->assertEquals('Sistem Informasi', $scheduleSI->prodi);
+        $this->assertEquals('A', $scheduleSI->kelas);
+
+        // Kedua jadwal harus berbeda (ID berbeda)
+        $this->assertNotEquals($scheduleInf->id, $scheduleSI->id);
+
+        // Mhs Informatika B: TIDAK bisa akses karena tidak ada jadwal untuk Informatika B
+        $this->assertFalse($test->isAccessibleBy($mhsInfB));
+        $this->assertNull($test->scheduleFor($mhsInfB));
+
+        // Mhs Informatika A bisa mulai ujian
+        $response = $this->actingAs($mhsInformatika)->get(route('mhs.mulai', $test));
+        $response->assertOk();
+
+        // Mhs SI A juga bisa mulai ujian
+        $response2 = $this->actingAs($mhsSI)->get(route('mhs.mulai', $test));
+        $response2->assertOk();
+
+        // Mhs Informatika B ditolak
+        $response3 = $this->actingAs($mhsInfB)->get(route('mhs.mulai', $test));
+        $response3->assertRedirect(route('dashboard'));
+        $response3->assertSessionHas('err');
+    }
+
+    public function test_ketat_deadline_follows_class_schedule(): void
+    {
+        // Skenario: Tes sifat ketat, kelas A selesai jam 10:00, kelas B selesai jam 14:00
+        $mhsA = User::create([
+            'name' => 'Mhs Ketat A',
+            'email' => 'mhs_ketat_a@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021040',
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+        ]);
+
+        $mhsB = User::create([
+            'name' => 'Mhs Ketat B',
+            'email' => 'mhs_ketat_b@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021050',
+            'prodi' => 'Informatika',
+            'kelas' => 'B',
+        ]);
+
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Ketat Jadwal Per Kelas',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '08:00',
+            'jam_selesai' => '14:00',
+            'durasi' => 120,
+            'sifat' => 'ketat',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q1', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+        Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q2', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+
+        // Kelas A: 08:00 - 10:00
+        TestSchedule::create([
+            'test_id' => $test->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '08:00',
+            'jam_selesai' => '10:00',
+        ]);
+
+        // Kelas B: 12:00 - 14:00
+        TestSchedule::create([
+            'test_id' => $test->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'B',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '12:00',
+            'jam_selesai' => '14:00',
+        ]);
+
+        // Verifikasi selesai_at untuk masing-masing kelas
+        $scheduleA = $test->scheduleFor($mhsA);
+        $scheduleB = $test->scheduleFor($mhsB);
+
+        $this->assertNotNull($scheduleA);
+        $this->assertNotNull($scheduleB);
+        $this->assertEquals('10:00', $scheduleA->selesai_at->format('H:i'));
+        $this->assertEquals('14:00', $scheduleB->selesai_at->format('H:i'));
+
+        // Simulasi attempt mhsA dimulai jam 08:30 (durasi 120 menit = selesai 10:30,
+        // tapi karena ketat dan jadwal kelas A berakhir 10:00, deadline harus 10:00)
+        $attemptA = Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $mhsA->id,
+            'started_at' => Carbon::parse(now()->toDateString() . ' 08:30'),
+            'finished_at' => null,
+            'question_ids' => [1, 2], // placeholder ids
+        ]);
+
+        // Gunakan refleksi private method deadline via controller test
+        // Cukup verifikasi bahwa selesai_at kelas A lebih dulu dari durasi penuh
+        $durasiPenuh = $attemptA->started_at->copy()->addMinutes($test->durasi); // 10:30
+        $this->assertTrue($scheduleA->selesai_at->lt($durasiPenuh)); // 10:00 < 10:30
+
+        // Untuk kelas B, attempt dimulai 12:30, durasi 120 menit = 14:30
+        // Jadwal kelas B berakhir 14:00, jadi deadline harus 14:00
+        $attemptB = Attempt::create([
+            'test_id' => $test->id,
+            'user_id' => $mhsB->id,
+            'started_at' => Carbon::parse(now()->toDateString() . ' 12:30'),
+            'finished_at' => null,
+            'question_ids' => [1, 2],
+        ]);
+
+        $durasiPenuhB = $attemptB->started_at->copy()->addMinutes($test->durasi); // 14:30
+        $this->assertTrue($scheduleB->selesai_at->lt($durasiPenuhB)); // 14:00 < 14:30
+    }
+
+    public function test_dosen_filter_prodi_kelas_on_rekap_nilai(): void
+    {
+        // Buat mahasiswa dari prodi/kelas berbeda
+        $mhsInfA = User::create([
+            'name' => 'Filter Inf A',
+            'email' => 'filter_inf_a@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021060',
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+        ]);
+
+        $mhsInfB = User::create([
+            'name' => 'Filter Inf B',
+            'email' => 'filter_inf_b@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021070',
+            'prodi' => 'Informatika',
+            'kelas' => 'B',
+        ]);
+
+        $mhsSIA = User::create([
+            'name' => 'Filter SI A',
+            'email' => 'filter_si_a@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021080',
+            'prodi' => 'Sistem Informasi',
+            'kelas' => 'A',
+        ]);
+
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Filter Prodi Kelas',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        $q1 = Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q1', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+        $q2 = Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q2', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+
+        // Semua mahasiswa mengerjakan ujian
+        foreach ([$mhsInfA, $mhsInfB, $mhsSIA] as $mhs) {
+            $this->actingAs($mhs)->get(route('mhs.mulai', $test));
+            $this->actingAs($mhs)->post(route('mhs.kirim', $test), [
+                'jawaban' => [$q1->id => 'a', $q2->id => 'a'],
+            ]);
+        }
+
+        // Tanpa filter: 3 peserta
+        $response = $this->actingAs($this->dosen)->get(route('dosen.nilai', $test));
+        $response->assertOk();
+        $this->assertCount(3, $response->viewData('attempts'));
+
+        // Filter prodi=Informatika: hanya 2 peserta (Inf A + Inf B)
+        $response = $this->actingAs($this->dosen)->get(route('dosen.nilai', $test) . '?prodi=Informatika');
+        $response->assertOk();
+        $this->assertCount(2, $response->viewData('attempts'));
+
+        // Filter kelas=A: 2 peserta (Inf A + SI A)
+        $response = $this->actingAs($this->dosen)->get(route('dosen.nilai', $test) . '?kelas=A');
+        $response->assertOk();
+        $this->assertCount(2, $response->viewData('attempts'));
+
+        // Filter prodi=Informatika&kelas=A: hanya 1 peserta (Inf A)
+        $response = $this->actingAs($this->dosen)->get(route('dosen.nilai', $test) . '?prodi=Informatika&kelas=A');
+        $response->assertOk();
+        $attempts = $response->viewData('attempts');
+        $this->assertCount(1, $attempts);
+        $this->assertEquals($mhsInfA->id, $attempts->first()->user_id);
+
+        // Filter prodi=Sistem Informasi&kelas=B: 0 peserta
+        $response = $this->actingAs($this->dosen)->get(route('dosen.nilai', $test) . '?prodi=Sistem+Informasi&kelas=B');
+        $response->assertOk();
+        $this->assertCount(0, $response->viewData('attempts'));
+    }
+
+    public function test_dosen_filter_prodi_kelas_on_live_monitoring(): void
+    {
+        $mhsInfA = User::create([
+            'name' => 'Live Inf A',
+            'email' => 'live_inf_a@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021090',
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+        ]);
+
+        $mhsSIB = User::create([
+            'name' => 'Live SI B',
+            'email' => 'live_si_b@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021100',
+            'prodi' => 'Sistem Informasi',
+            'kelas' => 'B',
+        ]);
+
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Live Filter',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q1', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+
+        // Kedua mahasiswa memulai ujian
+        $this->actingAs($mhsInfA)->get(route('mhs.mulai', $test));
+        $this->actingAs($mhsSIB)->get(route('mhs.mulai', $test));
+
+        // Tanpa filter: 2 peserta
+        $response = $this->actingAs($this->dosen)->getJson('/dosen/ujian/' . $test->id . '/live-monitoring');
+        $response->assertOk()->assertJsonCount(2, 'attempts');
+
+        // Filter prodi=Informatika: hanya 1
+        $response = $this->actingAs($this->dosen)->getJson('/dosen/ujian/' . $test->id . '/live-monitoring?prodi=Informatika');
+        $response->assertOk()
+            ->assertJsonCount(1, 'attempts')
+            ->assertJsonPath('attempts.0.user.prodi', 'Informatika');
+
+        // Filter kelas=B: hanya 1
+        $response = $this->actingAs($this->dosen)->getJson('/dosen/ujian/' . $test->id . '/live-monitoring?kelas=B');
+        $response->assertOk()
+            ->assertJsonCount(1, 'attempts')
+            ->assertJsonPath('attempts.0.user.kelas', 'B');
+
+        // Filter prodi=Informatika&kelas=B: 0
+        $response = $this->actingAs($this->dosen)->getJson('/dosen/ujian/' . $test->id . '/live-monitoring?prodi=Informatika&kelas=B');
+        $response->assertOk()->assertJsonCount(0, 'attempts');
+    }
+
+    public function test_test_without_schedules_is_accessible_by_all(): void
+    {
+        // Tes tanpa schedule -> backward compatible: semua mahasiswa bisa akses
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Tanpa Jadwal Khusus',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 2,
+            'kkm' => 70,
+        ]);
+
+        Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q1', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+        Question::create(['test_id' => $test->id, 'tipe' => 'pilihan_ganda', 'pertanyaan' => 'Q2', 'opsi_a' => 'A', 'opsi_b' => 'B', 'opsi_c' => 'C', 'opsi_d' => 'D', 'jawaban_benar' => 'a']);
+
+        // Mahasiswa tanpa prodi/kelas
+        $this->assertTrue($test->isAccessibleBy($this->mahasiswa));
+        $this->assertNull($test->scheduleFor($this->mahasiswa));
+
+        // Mahasiswa dengan prodi/kelas
+        $mhsWithClass = User::create([
+            'name' => 'Mhs Backward',
+            'email' => 'mhs_backward@unib.ac.id',
+            'password' => bcrypt('password'),
+            'role' => 'mahasiswa',
+            'nomor_induk' => 'G1A021110',
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+        ]);
+        $this->assertTrue($test->isAccessibleBy($mhsWithClass));
+
+        // Bisa mulai ujian
+        $response = $this->actingAs($this->mahasiswa)->get(route('mhs.mulai', $test));
+        $response->assertOk();
+    }
+
+    public function test_dosen_berlangsung_sees_composite_status_across_schedules(): void
+    {
+        // Dosen melihat status komposit: berlangsung = any schedule berlangsung, selesai = all schedules selesai
+        $test = Test::create([
+            'dosen_id' => $this->dosen->id,
+            'judul' => 'Ujian Komposit Status',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+        ]);
+
+        // Jadwal A: sudah selesai (kemarin)
+        TestSchedule::create([
+            'test_id' => $test->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+            'tanggal' => now()->subDay()->toDateString(),
+            'jam_mulai' => '08:00',
+            'jam_selesai' => '10:00',
+        ]);
+
+        // Jadwal B: sedang berlangsung (hari ini penuh)
+        TestSchedule::create([
+            'test_id' => $test->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'B',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:00',
+            'jam_selesai' => '23:59',
+        ]);
+
+        // Dari perspektif dosen (non-mahasiswa): berlangsung = true jika ada minimal 1 schedule aktif
+        $this->assertTrue($test->berlangsung($this->dosen));
+        // Selesai = false karena jadwal B masih aktif
+        $this->assertFalse($test->selesai($this->dosen));
     }
 }

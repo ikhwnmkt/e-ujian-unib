@@ -367,6 +367,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Kegunaan**:
   - **Pilihan Ganda**: Menyimpan pilihan radio button (A/B/C/D) secara instan saat opsi diklik mahasiswa, sekaligus menghitung status kebenaran (`benar`) di DB. Jika waktu ujian habis tanpa menekan tombol "Kirim", nilai akhir dihitung dari data yang tersimpan di DB ini (`finalizeAttempt`).
   - **Essai**: Menyimpan ketikan jawaban essai secara live untuk monitoring dosen.
+- **Aturan Debounce Frontend (Essai)**: Frontend **WAJIB** menerapkan debounce **1000ms (1 detik)** per `question_id` pada `<textarea>` essai sebelum mengirim request `autosave`. Artinya, request baru dikirim setelah mahasiswa berhenti mengetik selama 1 detik penuh. Ini mencegah request flooding ke server saat mahasiswa sedang aktif mengetik.
 - **Request Headers**:
   - `Content-Type: application/json`
   - `X-CSRF-TOKEN`: nilai token CSRF

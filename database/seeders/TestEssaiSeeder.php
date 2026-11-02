@@ -2,11 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\Answer;
-use App\Models\Attempt;
-use App\Models\Question;
-use App\Models\Test;
-use App\Models\User;
+use App\Models\{Answer, Attempt, Question, Test, TestSchedule, User};
 use Illuminate\Database\Seeder;
 
 class TestEssaiSeeder extends Seeder
@@ -24,27 +20,41 @@ class TestEssaiSeeder extends Seeder
             $mhs3 = User::where('email', 'mhs3@unib.ac.id')->first();
         }
 
-        if (! $dosen) {
-            throw new \RuntimeException('User dosen untuk data demo tidak ditemukan.');
-        }
+        // Hapus test essai demo sebelumnya jika ada agar idempotent saat re-seed
+        Test::where('judul', 'Ujian Tengah Semester: Analisis Kompleksitas Algoritma')->delete();
 
-        $testEssai = Test::updateOrCreate(
-            [
-                'dosen_id' => $dosen->id,
-                'judul' => 'Ujian Tengah Semester: Analisis Kompleksitas Algoritma',
-            ],
-            [
-                'materi' => 'Analisis Kompleksitas Algoritma',
-                'tipe_ujian' => 'essai',
-                'tanggal' => now()->toDateString(),
-                'jam_mulai' => '00:01',
-                'jam_selesai' => '23:59',
-                'durasi' => 90,
-                'sifat' => 'fleksibel',
-                'jumlah_soal_tampil' => 5,
-                'kkm' => 70,
-            ]
-        );
+        $testEssai = Test::create([
+            'dosen_id' => $dosen->id,
+            'judul' => 'Ujian Tengah Semester: Analisis Kompleksitas Algoritma',
+            'mata_kuliah' => 'Analisis Kompleksitas Algoritma',
+            'materi' => 'Analisis Kompleksitas Algoritma',
+            'tipe_ujian' => 'essai',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:01',
+            'jam_selesai' => '23:59',
+            'durasi' => 90,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 5,
+            'kkm' => 70,
+        ]);
+
+        // Jadwal per kelas
+        TestSchedule::create([
+            'test_id' => $testEssai->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:01',
+            'jam_selesai' => '23:59',
+        ]);
+        TestSchedule::create([
+            'test_id' => $testEssai->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'B',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:01',
+            'jam_selesai' => '23:59',
+        ]);
 
         $essaiQuestions = [
             [

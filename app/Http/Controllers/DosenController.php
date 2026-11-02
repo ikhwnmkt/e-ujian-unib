@@ -19,15 +19,22 @@ class DosenController extends Controller
     {
         return [
             'judul' => 'required|string|max:255',
+            'mata_kuliah' => 'nullable|string|max:255',
             'materi' => 'nullable|string|max:255',
             'tipe_ujian' => 'nullable|in:pilihan_ganda,essai',
-            'tanggal' => 'required|date',
-            'jam_mulai' => 'required|date_format:H:i',
-            'jam_selesai' => 'required|date_format:H:i|after:jam_mulai',
+            'tanggal' => 'required_without:schedules|nullable|date',
+            'jam_mulai' => 'required_without:schedules|nullable|date_format:H:i',
+            'jam_selesai' => 'required_without:schedules|nullable|date_format:H:i|after:jam_mulai',
             'durasi' => 'required|integer|min:1|max:600',
             'sifat' => 'required|in:fleksibel,ketat',
             'jumlah_soal_tampil' => 'nullable|integer|min:1|max:1000',
             'kkm' => 'nullable|integer|min:0|max:100',
+            'schedules' => 'nullable|array',
+            'schedules.*.prodi' => 'nullable|string|max:255',
+            'schedules.*.kelas' => 'required_with:schedules|string|max:10',
+            'schedules.*.tanggal' => 'required_with:schedules|date',
+            'schedules.*.jam_mulai' => 'required_with:schedules|date_format:H:i',
+            'schedules.*.jam_selesai' => 'required_with:schedules|date_format:H:i|after:schedules.*.jam_mulai',
         ];
     }
 
@@ -56,22 +63,50 @@ class DosenController extends Controller
     public function store(Request $r)
     {
         $data = $r->validate($this->rules());
+        $schedules = $data['schedules'] ?? null;
+        unset($data['schedules']);
+
         $data['tipe_ujian'] = $data['tipe_ujian'] ?? 'pilihan_ganda';
         $data['jumlah_soal_tampil'] = $data['jumlah_soal_tampil'] ?? 30;
         $data['kkm'] = $data['kkm'] ?? 70;
+
+        // Jika schedules diberikan, isi kolom tanggal/jam utama dari jadwal pertama sebagai fallback
+        if (!empty($schedules)) {
+            $first = $schedules[0];
+            $data['tanggal'] = $data['tanggal'] ?? $first['tanggal'];
+            $data['jam_mulai'] = $data['jam_mulai'] ?? $first['jam_mulai'];
+            $data['jam_selesai'] = $data['jam_selesai'] ?? $first['jam_selesai'];
+        }
+
         $test = auth()->user()->tests()->create($data);
+        $this->syncSchedules($test, $schedules);
+
         return redirect()->route('dosen.soal', $test)->with('ok', 'Tes dibuat. Silakan tambahkan soal.');
     }
 
-    public function edit(Test $test) { return view('dosen.form', ['test' => $this->own($test)]); }
+    public function edit(Test $test) { return view('dosen.form', ['test' => $this->own($test)->load('schedules')]); }
 
     public function update(Request $r, Test $test)
     {
         $data = $r->validate($this->rules());
+        $schedules = $data['schedules'] ?? null;
+        unset($data['schedules']);
+
         if (empty($data['tipe_ujian'])) {
             unset($data['tipe_ujian']);
         }
+
+        // Jika schedules diberikan, isi kolom tanggal/jam utama dari jadwal pertama sebagai fallback
+        if (!empty($schedules)) {
+            $first = $schedules[0];
+            $data['tanggal'] = $data['tanggal'] ?? $first['tanggal'];
+            $data['jam_mulai'] = $data['jam_mulai'] ?? $first['jam_mulai'];
+            $data['jam_selesai'] = $data['jam_selesai'] ?? $first['jam_selesai'];
+        }
+
         $this->own($test)->update($data);
+        $this->syncSchedules($test, $schedules);
+
         return redirect()->route('dosen.index')->with('ok', 'Tes diperbarui.');
     }
 
@@ -141,9 +176,19 @@ unset($data['media_file']);
     public function nilai(Test $test)
     {
         $test = $this->own($test);
+        $attempts = $test->getPrimaryAttempts();
+
+        // Filter berdasarkan query ?prodi=...&kelas=...
+        if (request('prodi')) {
+            $attempts = $attempts->filter(fn ($a) => strcasecmp($a->user->prodi ?? '', request('prodi')) === 0)->values();
+        }
+        if (request('kelas')) {
+            $attempts = $attempts->filter(fn ($a) => strcasecmp($a->user->kelas ?? '', request('kelas')) === 0)->values();
+        }
+
         return view('dosen.nilai', [
             'test' => $test,
-            'attempts' => $test->getPrimaryAttempts(),
+            'attempts' => $attempts,
         ]);
     }
 
@@ -191,7 +236,7 @@ unset($data['media_file']);
 
         $allAttempts = $test->attempts()
             ->with([
-                'user:id,name,nomor_induk,avatar',
+                'user:id,name,nomor_induk,avatar,prodi,kelas',
                 'answers' => function ($q) {
                     $q->select('id', 'attempt_id', 'question_id', 'jawaban', 'jawaban_essai', 'updated_at')
                       ->orderBy('question_id');
@@ -226,6 +271,9 @@ unset($data['media_file']);
                     'name' => $attempt->user->name,
                     'nomor_induk' => $attempt->user->nomor_induk,
                     'avatar' => $attempt->user->avatar,
+                    'prodi' => $attempt->user->prodi,
+                    'kelas' => $attempt->user->kelas,
+                    'prodi_kelas' => $attempt->user->prodi_kelas,
                 ],
                 'started_at' => $attempt->started_at?->toIso8601String(),
                 'finished_at' => $attempt->finished_at?->toIso8601String(),
@@ -250,6 +298,14 @@ unset($data['media_file']);
         ->sortByDesc('updated_at')
         ->values();
 
+        // Filter berdasarkan query ?prodi=...&kelas=...
+        if ($request->query('prodi')) {
+            $attempts = $attempts->filter(fn ($a) => strcasecmp($a['user']['prodi'] ?? '', $request->query('prodi')) === 0)->values();
+        }
+        if ($request->query('kelas')) {
+            $attempts = $attempts->filter(fn ($a) => strcasecmp($a['user']['kelas'] ?? '', $request->query('kelas')) === 0)->values();
+        }
+
         return response()->json([
             'status' => 'success',
             'test' => [
@@ -264,5 +320,24 @@ unset($data['media_file']);
             'server_time' => now()->toIso8601String(),
             'attempts' => $attempts,
         ]);
+    }
+
+    private function syncSchedules(Test $test, ?array $schedules): void
+    {
+        if ($schedules === null) {
+            return;
+        }
+
+        $test->schedules()->delete();
+
+        foreach ($schedules as $s) {
+            $test->schedules()->create([
+                'prodi' => $s['prodi'] ?? null,
+                'kelas' => $s['kelas'],
+                'tanggal' => $s['tanggal'],
+                'jam_mulai' => $s['jam_mulai'],
+                'jam_selesai' => $s['jam_selesai'],
+            ]);
+        }
     }
 }

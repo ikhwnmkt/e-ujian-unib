@@ -2,11 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\Answer;
-use App\Models\Attempt;
-use App\Models\Question;
-use App\Models\Test;
-use App\Models\User;
+use App\Models\{Answer, Attempt, Question, Test, TestSchedule, User};
 use Illuminate\Database\Seeder;
 
 class TestPilganSeeder extends Seeder
@@ -22,27 +18,41 @@ class TestPilganSeeder extends Seeder
             $mhs2 = User::where('email', 'mhs2@unib.ac.id')->first();
         }
 
-        if (! $dosen) {
-            throw new \RuntimeException('User dosen untuk data demo tidak ditemukan.');
-        }
+        // Hapus test pilgan demo sebelumnya jika ada agar idempotent saat re-seed
+        Test::where('judul', 'Ujian Akhir Semester: Struktur Data & Algoritma')->delete();
 
-        $testPilgan = Test::updateOrCreate(
-            [
-                'dosen_id' => $dosen->id,
-                'judul' => 'Ujian Akhir Semester: Struktur Data & Algoritma',
-            ],
-            [
-                'materi' => 'Struktur Data & Algoritma',
-                'tipe_ujian' => 'pilihan_ganda',
-                'tanggal' => now()->toDateString(),
-                'jam_mulai' => '00:01',
-                'jam_selesai' => '23:59',
-                'durasi' => 60,
-                'sifat' => 'fleksibel',
-                'jumlah_soal_tampil' => 30,
-                'kkm' => 70,
-            ]
-        );
+        $testPilgan = Test::create([
+            'dosen_id' => $dosen->id,
+            'judul' => 'Ujian Akhir Semester: Struktur Data & Algoritma',
+            'mata_kuliah' => 'Struktur Data & Algoritma',
+            'materi' => 'Struktur Data & Algoritma',
+            'tipe_ujian' => 'pilihan_ganda',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:01',
+            'jam_selesai' => '23:59',
+            'durasi' => 60,
+            'sifat' => 'fleksibel',
+            'jumlah_soal_tampil' => 30,
+            'kkm' => 70,
+        ]);
+
+        // Jadwal per kelas
+        TestSchedule::create([
+            'test_id' => $testPilgan->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'A',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:01',
+            'jam_selesai' => '23:59',
+        ]);
+        TestSchedule::create([
+            'test_id' => $testPilgan->id,
+            'prodi' => 'Informatika',
+            'kelas' => 'B',
+            'tanggal' => now()->toDateString(),
+            'jam_mulai' => '00:01',
+            'jam_selesai' => '23:59',
+        ]);
 
         $soalList = [
             [

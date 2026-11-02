@@ -35,6 +35,6 @@ class Attempt extends Model
             && $this->finished_at !== null
             && $this->nilai !== null
             && !$this->isPassed()
-            && ($this->test?->berlangsung() ?? false);
+            && ($this->test?->berlangsung($this->user) ?? false);
     }
 }

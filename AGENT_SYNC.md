@@ -85,25 +85,56 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 
 ### 3. Dashboard Dosen (`prefix: dosen`, `middleware: auth, role:dosen`)
 
+#### Model `User` (Pembaruan: Kelas Mahasiswa)
+- **Kolom Baru Tabel `users`**:
+  - `kelas` (`string`, `nullable`): Kelas mahasiswa (A, B, C, dst.).
+  - `prodi` (`string`, `nullable`): Program studi.
+- **Konstanta Validasi**:
+  - `User::KELAS_LIST`: `['A', 'B', 'C', 'D', 'E']`
+  - `User::PRODI_LIST`: `['Pendidikan Teknik Informatika dan Komputer', 'Informatika', 'Sistem Informasi', 'Teknik Elektro', 'Teknik Mesin', 'Teknik Sipil', 'Arsitektur']`
+- **Accessor**:
+  - `$user->prodi_kelas`: `string` (contoh: `"Informatika - Kelas A"`, atau `"-"` jika keduanya null).
+
 #### Model `Test` (Pembaruan Skema Lengkap)
 - **Kolom Tabel `tests`**:
   - `id` (`bigint`)
   - `dosen_id` (`foreignId -> users`)
   - `judul` (`string`)
-  - `materi` (`string`, `nullable`) *(Baru)*: Nama materi/topik bahasan ujian.
+  - `mata_kuliah` (`string`, `nullable`) *(Baru)*: Nama mata kuliah pada paket tes.
+  - `materi` (`string`, `nullable`): Nama materi/topik bahasan ujian.
   - `tipe_ujian` (`enum: 'pilihan_ganda', 'essai'`)
-  - `jumlah_soal_tampil` (`integer`, `default: 30`) *(Baru)*: Jumlah soal yang ditarik secara acak per attempt (subset random).
-  - `kkm` (`integer`, `default: 70`) *(Baru)*: Batas nilai kelulusan / passing grade mahasiswa.
+  - `jumlah_soal_tampil` (`integer`, `default: 30`): Jumlah soal yang ditarik secara acak per attempt (subset random).
+  - `kkm` (`integer`, `default: 70`): Batas nilai kelulusan / passing grade mahasiswa.
   - `tanggal` (`date`)
   - `jam_mulai` (`time`)
   - `jam_selesai` (`time`)
   - `durasi` (`unsignedInteger`, menit)
   - `sifat` (`enum: 'fleksibel', 'ketat'`)
+- **Relasi**:
+  - `$test->schedules()`: `HasMany(TestSchedule)` — jadwal per prodi+kelas.
 - **Helper Model `Test`**:
   - `$test->isPilihanGanda()`: `bool`
   - `$test->isEssai()`: `bool`
   - `$test->tipe_ujian_label`: `string` ('Pilihan Ganda' | 'Esai')
-  - `$test->mulai_at`, `$test->selesai_at`, `$test->berlangsung()`, `$test->selesai()`
+  - `$test->mulai_at`, `$test->selesai_at`, `$test->berlangsung(?User)`, `$test->selesai(?User)` — **context-aware**: otomatis merujuk ke jadwal kelas mahasiswa yang login, atau fallback ke kolom utama jika tes tanpa schedule.
+  - `$test->scheduleFor(?User)`: `?TestSchedule` — mencari jadwal berdasarkan prodi+kelas mahasiswa. Prioritaskan jadwal yang mendefinisikan prodi secara spesifik.
+  - `$test->isAccessibleBy(?User)`: `bool` — jika tes punya schedule, hanya mahasiswa dengan prodi+kelas yang cocok yang bisa akses.
+
+#### Model `TestSchedule` (Baru: Jadwal Ujian Majemuk)
+- **Tabel `test_schedules`**:
+  - `id` (`bigint`)
+  - `test_id` (`foreignId -> tests`, cascade delete)
+  - `prodi` (`string`, `nullable`): Program studi target.
+  - `kelas` (`string`): Kelas target (A, B, C, dst.).
+  - `tanggal` (`date`)
+  - `jam_mulai` (`time`)
+  - `jam_selesai` (`time`)
+  - **Unique constraint**: `['test_id', 'prodi', 'kelas']`
+- **Helper Model `TestSchedule`**:
+  - `$schedule->mulai_at`, `$schedule->selesai_at`: `Carbon`
+  - `$schedule->tanggal_indo`: `string`
+  - `$schedule->waktu`: `string` (format `"HH:MM - HH:MM"`)
+  - `$schedule->berlangsung()`, `$schedule->selesai()`: `bool`
 
 #### Model `Attempt` (Pembaruan Skema & Remedial)
 - **Kolom Tabel `attempts`**:
@@ -136,22 +167,30 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
     - `durasi = 90`, `sifat = 'fleksibel'`, `tipe_ujian = 'pilihan_ganda'`, `jumlah_soal_tampil = 30`, `kkm = 70`.
 - **Form Submission**: `POST /dosen/tes` (`route('dosen.store')`)
   - `judul`: `required|string|max:255`
-  - `materi`: `nullable|string|max:255` *(Baru)*
+  - `mata_kuliah`: `nullable|string|max:255` *(Baru)*
+  - `materi`: `nullable|string|max:255`
   - `tipe_ujian`: `required|in:pilihan_ganda,essai` (default: `pilihan_ganda`)
-  - `jumlah_soal_tampil`: `nullable|integer|min:1|max:1000` (default: 30) *(Baru)*
-  - `kkm`: `nullable|integer|min:0|max:100` (default: 70) *(Baru)*
-  - `tanggal`: `required|date`
-  - `jam_mulai`: `required|date_format:H:i`
-  - `jam_selesai`: `required|date_format:H:i|after:jam_mulai`
+  - `jumlah_soal_tampil`: `nullable|integer|min:1|max:1000` (default: 30)
+  - `kkm`: `nullable|integer|min:0|max:100` (default: 70)
+  - `tanggal`: `required_without:schedules|nullable|date`
+  - `jam_mulai`: `required_without:schedules|nullable|date_format:H:i`
+  - `jam_selesai`: `required_without:schedules|nullable|date_format:H:i|after:jam_mulai`
   - `durasi`: `required|integer|min:1|max:600`
   - `sifat`: `required|in:fleksibel,ketat`
+  - `schedules`: `nullable|array` *(Baru)* — array jadwal per prodi+kelas.
+  - `schedules.*.prodi`: `nullable|string|max:255`
+  - `schedules.*.kelas`: `required_with:schedules|string|max:10`
+  - `schedules.*.tanggal`: `required_with:schedules|date`
+  - `schedules.*.jam_mulai`: `required_with:schedules|date_format:H:i`
+  - `schedules.*.jam_selesai`: `required_with:schedules|date_format:H:i|after:schedules.*.jam_mulai`
+  - **Fallback**: Jika `schedules` diberikan tapi `tanggal`/`jam_mulai`/`jam_selesai` utama tidak, kolom utama diisi dari jadwal pertama.
 
 #### `GET /dosen/tes/{test}/edit`
 - **Route Name**: `dosen.edit`
 - **Controller**: `DosenController@edit`
 - **Target Blade**: `resources/views/dosen/form.blade.php`
 - **Data ke View**:
-  - `$test` (`App\Models\Test`): Data tes milik dosen bersangkutan.
+  - `$test` (`App\Models\Test` eager load `schedules`): Data tes milik dosen bersangkutan beserta jadwal per kelas.
 - **Form Submission**: `PUT /dosen/tes/{test}` (`route('dosen.update', $test)`)
   - Aturan validasi sama dengan `dosen.store`.
 
@@ -185,6 +224,10 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Route Name**: `dosen.nilai`
 - **Controller**: `DosenController@nilai`
 - **Target Blade**: `resources/views/dosen/nilai.blade.php`
+- **Query Params Filter** *(Baru)*:
+  - `?prodi=Informatika` — filter peserta berdasarkan prodi mahasiswa.
+  - `?kelas=A` — filter peserta berdasarkan kelas mahasiswa.
+  - `?prodi=Informatika&kelas=A` — filter gabungan prodi + kelas.
 - **Data ke View**:
   - `$test` (`App\Models\Test`): Data tes.
   - `$attempts` (`Illuminate\Support\Collection<App\Models\Attempt>`): Koleksi **Attempt utama ter-deduplikasi (1 baris per mahasiswa)**, di mana mahasiswa yang remedial tidak muncul sebagai baris ganda.
@@ -217,6 +260,21 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
   - **Akses Browser (HTML)**: Dosen langsung disajikan halaman visual Live Monitoring dengan dashboard realtime, counter peserta, dan polling otomatis setiap 3 detik.
   - **Akses AJAX/JSON**: Mengembalikan payload JSON near real-time untuk komponen frontend / polling JavaScript.
 - **Deduplikasi**: Mahasiswa yang remedial **hanya muncul 1 kali** (mengambil attempt paling mutakhir / `latest('id')`), dengan penanda `attempt_count`.
+- **WebSocket Real-Time untuk Ujian Essai** *(Baru)*:
+  - **HANYA ujian bertipe `essai`** yang mendukung broadcast WebSocket real-time via Laravel Broadcasting.
+  - Backend men-trigger event `ExamActivityUpdated` ke Private Channel `exam.{testId}` dengan nama event `.activity.updated` saat mahasiswa:
+    1. Mulai ujian essai (`mhs.mulai`)
+    2. Autosave jawaban essai (`mhs.autosave`)
+    3. Submit ujian essai (`mhs.kirim`)
+  - **Otorisasi Channel `exam.{testId}`** (`routes/channels.php`): Hanya **Admin** atau **Dosen pemilik ujian** yang diizinkan subscribe (mahasiswa dan dosen lain ditolak `return false`).
+  - **Fallback & Initial State**: Endpoint `GET /dosen/ujian/{test}/live-monitoring` tetap berfungsi sebagai:
+    - **Initial state loader** saat halaman monitoring pertama kali dibuka (sebelum WebSocket connection established).
+    - **Fallback polling** untuk ujian pilihan ganda atau jika koneksi WebSocket gagal.
+  - **UI Frontend**: Tombol/tab **Live Monitoring** dapat ditampilkan hanya pada ujian `$test->isEssai()` untuk pengalaman monitoring real-time via WebSocket. Ujian pilihan ganda tetap menggunakan polling 3 detik.
+- **Query Params Filter** *(Baru)*:
+  - `?prodi=Informatika` — filter peserta berdasarkan prodi mahasiswa.
+  - `?kelas=A` — filter peserta berdasarkan kelas mahasiswa.
+  - `?prodi=Informatika&kelas=B` — filter gabungan prodi + kelas.
 - **Response JSON**:
   ```json
   {
@@ -239,7 +297,10 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
           "id": 5,
           "name": "Bahlil Lahadalia",
           "nomor_induk": "2405090032",
-          "avatar": null
+          "avatar": null,
+          "prodi": "Informatika",
+          "kelas": "A",
+          "prodi_kelas": "Informatika - Kelas A"
         },
         "started_at": "2026-10-31T00:10:00.000000Z",
         "finished_at": null,
@@ -273,7 +334,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Controller**: `MahasiswaController@index`
 - **Target Blade**: `resources/views/mahasiswa/index.blade.php`
 - **Data ke View**:
-  - `$aktif` (`Illuminate\Support\Collection<App\Models\Test>`): Ujian aktif yang belum diselesaikan ATAU ujian pilihan ganda yang memenuhi syarat remedial (`canRemedial() == true`).
+  - `$aktif` (`Illuminate\Support\Collection<App\Models\Test>`): Ujian aktif yang belum diselesaikan ATAU ujian pilihan ganda yang memenuhi syarat remedial (`canRemedial() == true`). **Difilter** agar hanya menampilkan ujian yang `isAccessibleBy()` terhadap mahasiswa yang login (ujian dengan jadwal hanya muncul jika prodi+kelas cocok).
   - `$riwayat` (`Illuminate\Support\Collection<App\Models\Test>`): Ujian yang telah lulus atau jadwal ujian telah selesai.
   - `$attempts` (`Illuminate\Support\Collection<int, App\Models\Attempt>`): Map attempt mahasiswa terbaru keyed by `test_id`.
 
@@ -282,6 +343,8 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Controller**: `MahasiswaController@mulai`
 - **Target Blade**: `resources/views/mahasiswa/ujian.blade.php`
 - **Logika & Alur**:
+  0. **Guard Akses Jadwal Prodi+Kelas** *(Baru)*:
+     - Jika tes memiliki `schedules`, hanya mahasiswa dengan prodi+kelas yang cocok yang boleh mengakses. Jika tidak cocok, redirect ke dashboard dengan flash session `err`: `"Ujian ini tidak diperuntukkan bagi program studi atau kelas Anda."`
   1. **Transaksional & Anti Dobel Attempt (Idempotent)**:
      - Dibungkus dalam `DB::transaction` dan diserialisasi per user menggunakan `User::lockForUpdate()`.
      - Menjamin untuk satu pasangan `(test_id, user_id)` **tidak akan pernah ada lebih dari satu attempt aktif (`finished_at = null`)**. Panggilan kedua/simultan akan melanjutkan attempt aktif yang sama.
@@ -315,6 +378,7 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 - **Kegunaan**:
   - **Pilihan Ganda**: Menyimpan pilihan radio button (A/B/C/D) secara instan saat opsi diklik mahasiswa, sekaligus menghitung status kebenaran (`benar`) di DB. Jika waktu ujian habis tanpa menekan tombol "Kirim", nilai akhir dihitung dari data yang tersimpan di DB ini (`finalizeAttempt`).
   - **Essai**: Menyimpan ketikan jawaban essai secara live untuk monitoring dosen.
+- **Debounce untuk Essai**: Frontend **WAJIB** menerapkan debounce **1000ms (1 detik)** setelah perubahan terakhir pada `<textarea>` sebelum mengirim request `autosave` untuk soal essai. Tujuannya: mencegah flooding request saat mahasiswa sedang mengetik cepat.
 - **Request Headers**:
   - `Content-Type: application/json`
   - `X-CSRF-TOKEN`: nilai token CSRF
@@ -427,24 +491,26 @@ Dokumen ini adalah kontrak sinkronisasi antara **Senior Laravel Backend Develope
 
 #### A. Struktur Migration (1 Tabel = 1 File Migration)
 Arsitektur migrasi database telah dirapikan menjadi format 1 tabel per file tanpa file alter tambahan:
-1. `0001_01_01_000000_create_users_table.php` &rarr; Tabel `users` (lengkap dengan atribut profil, role, dan prodi).
+1. `0001_01_01_000000_create_users_table.php` &rarr; Tabel `users` (lengkap dengan atribut profil, role, prodi, dan **kelas**).
 2. `0001_01_01_000001_create_password_reset_tokens_table.php` &rarr; Tabel `password_reset_tokens`.
 3. `0001_01_01_000002_create_sessions_table.php` &rarr; Tabel `sessions`.
 4. `0001_01_01_000003_create_cache_table.php` &rarr; Tabel `cache` & `cache_locks`.
 5. `0001_01_01_000004_create_jobs_table.php` &rarr; Tabel `jobs`, `job_batches`, & `failed_jobs`.
-6. `2026_10_30_000001_create_tests_table.php` &rarr; Tabel `tests` (lengkap dengan `tipe_ujian`, `materi`, `kkm`, `jumlah_soal_tampil`).
+6. `2026_10_30_000001_create_tests_table.php` &rarr; Tabel `tests` (lengkap dengan `tipe_ujian`, `mata_kuliah`, `materi`, `kkm`, `jumlah_soal_tampil`).
 7. `2026_10_30_000002_create_questions_table.php` &rarr; Tabel `questions` (lengkap dengan `tipe`, `pertanyaan`, opsi A-D, kunci, media).
 8. `2026_10_30_000003_create_attempts_table.php` &rarr; Tabel `attempts` (lengkap dengan `question_ids`, `started_at`, `finished_at`, `nilai`, dan index non-unique untuk remedial).
 9. `2026_10_30_000004_create_answers_table.php` &rarr; Tabel `answers` (lengkap dengan `jawaban`, `jawaban_essai`, `benar`).
+10. `2026_10_30_000005_create_test_schedules_table.php` &rarr; Tabel `test_schedules` (jadwal ujian per prodi+kelas, unique constraint `[test_id, prodi, kelas]`).
 
 #### B. Seeder Modular
 Seeder dapat dijalankan sekaligus via `php artisan db:seed` atau secara terpisah per modul:
-* `Database\Seeders\UserSeeder` &rarr; Mengisi akun Admin, Dosen, dan 3 Mahasiswa.
-* `Database\Seeders\TestPilganSeeder` &rarr; Mengisi Ujian Pilgan (50 butir bank soal) dan riwayat remedial Mahasiswa 2.
-* `Database\Seeders\TestEssaiSeeder` &rarr; Mengisi Ujian Essai (5 butir soal essai), attempt live monitoring Mahasiswa 2, dan attempt siap nilai Mahasiswa 3.
-* `Database\Seeders\DatabaseSeeder` &rarr; Master seeder yang memanggil ketiga seeder di atas.
+* `Database\Seeders\UserSeeder` &rarr; Mengisi akun Admin, Dosen, dan 3 Mahasiswa (mhs1: Informatika A, mhs2: Informatika A, mhs3: Informatika B).
+* `Database\Seeders\TestPilganSeeder` &rarr; Mengisi Ujian Pilgan hari ini (50 butir bank soal), jadwal TestSchedule per kelas A & B, dan riwayat remedial Mahasiswa 2.
+* `Database\Seeders\TestEssaiSeeder` &rarr; Mengisi Ujian Essai hari ini (5 butir soal essai), jadwal TestSchedule per kelas A & B, attempt live monitoring Mahasiswa 2, dan attempt siap nilai Mahasiswa 3.
+* `Database\Seeders\TestBesokSeeder` &rarr; Mengisi Ujian Pilgan terjadwal untuk hari esok (25 butir bank soal), jadwal TestSchedule per kelas A & B, tanpa attempt awal.
+* `Database\Seeders\DatabaseSeeder` &rarr; Master seeder yang memanggil keempat seeder di atas.
 
-#### C. Kredensial Login & Skenario Data Demo (`php artisan migrate:fresh --seed`)
+#### C. Kredensial Login & Skenario Data Demo (`php artisan db:seed`)
 
 Untuk keperluan pengujian UI/Frontend, database telah diisi data demo realistis:
 
@@ -453,21 +519,36 @@ Untuk keperluan pengujian UI/Frontend, database telah diisi data demo realistis:
 |---|---|---|---|---|---|
 | **Admin** | `admin@unib.ac.id` | `password` | - | Administrator UNIB | Kelola pengguna & lihat detail ujian peserta ter-deduplikasi. |
 | **Dosen** | `dosen@unib.ac.id` | `password` | `198001012005012001` | Dr. Ir. Dosen Pengampu, M.Kom. | Pembuat ujian, Live Monitoring ketikan essai, dan input nilai essai manual. |
-| **Mahasiswa 1** | `mhs1@unib.ac.id` | `password` | `G1A021001` | Aditya Pratama | **Fresh User**: Belum memiliki attempt sama sekali. Siap untuk demo klik "Mulai Ujian" dari nol (acak 30 soal dari 50 bank soal). |
-| **Mahasiswa 2** | `mhs2@unib.ac.id` | `password` | `G1A021002` | Budi Santoso | **Multi-Attempt & Live**: <br>1. *Ujian Pilgan*: Punya 2 attempt (Attempt 1 gagal skor 40, Attempt 2 lulus skor 80) -> Siap uji deduplikasi & riwayat remedial.<br>2. *Ujian Essai*: Sedang aktif mengerjakan (attempt belum selesai) dengan 2 jawaban live monitoring. |
-| **Mahasiswa 3** | `mhs3@unib.ac.id` | `password` | `G1A021003` | Citra Lestari | **Siap Dinilai**: <br>Sudah submit ujian essai lengkap (`nilai = null`, Menunggu Penilaian). Siap untuk demo form input/update nilai oleh Dosen. |
+| **Mahasiswa 1** | `mhs1@unib.ac.id` | `password` | `G1A021001` | Aditya Pratama | **Informatika - Kelas A** | **Fresh User**: Belum memiliki attempt sama sekali. Siap untuk demo klik "Mulai Ujian" dari nol (acak 30 soal dari 50 bank soal). |
+| **Mahasiswa 2** | `mhs2@unib.ac.id` | `password` | `G1A021002` | Budi Santoso | **Informatika - Kelas A** | **Multi-Attempt & Live**: <br>1. *Ujian Pilgan*: Punya 2 attempt (Attempt 1 gagal skor 40, Attempt 2 lulus skor 80) -> Siap uji deduplikasi & riwayat remedial.<br>2. *Ujian Essai*: Sedang aktif mengerjakan (attempt belum selesai) dengan 2 jawaban live monitoring. |
+| **Mahasiswa 3** | `mhs3@unib.ac.id` | `password` | `G1A021003` | Citra Lestari | **Informatika - Kelas B** | **Siap Dinilai**: <br>Sudah submit ujian essai lengkap (`nilai = null`, Menunggu Penilaian). Siap untuk demo form input/update nilai oleh Dosen. |
 
-#### Daftar Ujian Tersedia (Aktif Hari Ini)
-1. **Ujian Pilihan Ganda**:
+#### Daftar Ujian Tersedia
+1. **Ujian Pilihan Ganda (Aktif Hari Ini)**:
    - Judul: *Ujian Akhir Semester: Struktur Data & Algoritma*
+   - Mata Kuliah: *Struktur Data & Algoritma*
    - Materi: *Struktur Data & Algoritma*
    - Bank Soal: **50 soal** (diambil acak **30 soal** per attempt)
+   - Tanggal: Hari ini (`now()->toDateString()`), Waktu: `00:01 - 23:59`
    - Durasi: **60 menit**, Sifat: **Fleksibel**, KKM: **70**
-2. **Ujian Essai**:
+   - Jadwal: Informatika Kelas A (`00:01-23:59`), Informatika Kelas B (`00:01-23:59`)
+2. **Ujian Essai (Aktif Hari Ini)**:
    - Judul: *Ujian Tengah Semester: Analisis Kompleksitas Algoritma*
+   - Mata Kuliah: *Analisis Kompleksitas Algoritma*
    - Materi: *Analisis Kompleksitas Algoritma*
    - Soal: **5 butir soal essai**
+   - Tanggal: Hari ini (`now()->toDateString()`), Waktu: `00:01 - 23:59`
    - Durasi: **90 menit**, Sifat: **Fleksibel**, KKM: **70**
+   - Jadwal: Informatika Kelas A (`00:01-23:59`), Informatika Kelas B (`00:01-23:59`)
+3. **Ujian Pilihan Ganda (Terjadwal Hari Esok - Sepanjang Hari)**:
+   - Judul: *Ujian Akhir Semester: Pemrograman Web & Basis Data*
+   - Mata Kuliah: *Pemrograman Web & Basis Data*
+   - Materi: *Pemrograman Web & Basis Data*
+   - Bank Soal: **25 soal** (diambil acak **20 soal** per attempt)
+   - Tanggal: Hari esok (`now()->addDay()->toDateString()`), Waktu: `00:01 - 23:59`
+   - Durasi: **60 menit**, Sifat: **Fleksibel**, KKM: **70**
+   - Jadwal: Informatika Kelas A (`00:01-23:59`), Informatika Kelas B (`00:01-23:59`)
+   - Status: Terjadwal untuk hari esok (tombol Mulai non-aktif bagi mahasiswa sampai waktu ujian tiba).
 
 
 ---
@@ -493,6 +574,9 @@ DB_DATABASE=ujian_unib
 DB_USERNAME=root
 DB_PASSWORD=1234
 SESSION_DRIVER=database
+
+# Broadcasting: "log" untuk dev/testing (tanpa WebSocket server)
+BROADCAST_CONNECTION=log
 ```
 
 #### `.env.testing` (Test Runner - TIDAK di git)
@@ -504,10 +588,179 @@ DB_DATABASE=ujian_unib_test   # ← DB terpisah untuk test
 DB_USERNAME=root
 DB_PASSWORD=1234
 SESSION_DRIVER=array
+BROADCAST_CONNECTION=log       # ← WAJIB "log" untuk fast testing
+```
+
+#### `.env` Production (untuk deployment dengan WebSocket real-time)
+```env
+APP_URL=https://your-domain.com
+APP_KEY=base64:...
+DB_CONNECTION=pgsql
+# ... (database credentials)
+
+# WebSocket Real-Time dengan Laravel Reverb
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=your-app-id
+REVERB_APP_KEY=your-app-key
+REVERB_APP_SECRET=your-app-secret
+REVERB_HOST=your-domain.com
+REVERB_PORT=443
+REVERB_SCHEME=https
+
+# Vite Environment Variables (untuk client-side WebSocket)
+VITE_REVERB_APP_KEY="${REVERB_APP_KEY}"
+VITE_REVERB_HOST="${REVERB_HOST}"
+VITE_REVERB_PORT="${REVERB_PORT}"
+VITE_REVERB_SCHEME="${REVERB_SCHEME}"
+
+QUEUE_CONNECTION=database
 ```
 
 > **PENTING untuk Developer Baru**: Setelah clone repo:
 > 1. Copy `.env.example` → `.env`, sesuaikan `APP_URL` dengan path subfolder Laragon
+> 2. Set `BROADCAST_CONNECTION=log` untuk development lokal (WebSocket hanya simulasi log)
+> 3. Buat `.env.testing` seperti template di atas dengan `DB_DATABASE=ujian_unib_test` dan `APP_URL=http://localhost`
+> 4. Buat database test: `CREATE DATABASE ujian_unib_test;`
+> 5. Jalankan `php artisan migrate --env=testing`
+> 6. Jalankan `php artisan migrate:fresh --seed` untuk seed data development
+
+---
+
+## 🚀 Deployment Production dengan WebSocket
+
+### Opsi 1: Laravel Reverb (Self-Hosted WebSocket Server)
+
+**Kebutuhan Infrastructure:**
+1. **Server WebSocket Terpisah** atau **Container Reverb** yang berjalan paralel dengan aplikasi utama
+2. **Port Terbuka**: Port 8080 (atau custom) untuk Reverb server
+3. **Reverse Proxy**: Nginx/Caddy untuk routing WebSocket `/app` ke Reverb server
+
+**Setup Docker Compose untuk Reverb:**
+```yaml
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "80:80"
+    environment:
+      BROADCAST_CONNECTION: reverb
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+    depends_on:
+      - reverb
+
+  reverb:
+    image: quay.io/soketi/soketi:latest-16-alpine
+    ports:
+      - "8080:6001"
+    environment:
+      SOKETI_DEFAULT_APP_ID: your-app-id
+      SOKETI_DEFAULT_APP_KEY: your-app-key
+      SOKETI_DEFAULT_APP_SECRET: your-app-secret
+      SOKETI_ADAPTER_DRIVER: memory
+```
+
+**Catatan**: Laravel Reverb berbasis Soketi (WebSocket server ringan kompatibel dengan Pusher protocol).
+
+### Opsi 2: Pusher (SaaS - Tanpa Infrastructure WebSocket)
+
+**Keunggulan:**
+- ✅ Tidak perlu maintain WebSocket server sendiri
+- ✅ Auto-scaling
+- ✅ Free tier: 100 concurrent connections, 200k messages/day
+
+**Setup `.env` Production:**
+```env
+BROADCAST_CONNECTION=pusher
+PUSHER_APP_ID=your-pusher-app-id
+PUSHER_APP_KEY=your-pusher-key
+PUSHER_APP_SECRET=your-pusher-secret
+PUSHER_APP_CLUSTER=ap1  # Asia Pacific 1 (Singapore)
+
+VITE_REVERB_APP_KEY="${PUSHER_APP_KEY}"
+VITE_REVERB_HOST="${PUSHER_APP_CLUSTER}.pusher.com"
+VITE_REVERB_PORT=443
+VITE_REVERB_SCHEME=https
+```
+
+**Signup Pusher**: https://pusher.com/channels
+
+### Opsi 3: Development/Testing Tanpa WebSocket (Fallback Polling)
+
+Jika infrastruktur WebSocket belum siap, aplikasi tetap berfungsi dengan **polling fallback**:
+- Set `BROADCAST_CONNECTION=log` di `.env`
+- Frontend otomatis fallback ke polling tiap 3 detik
+- Tidak ada fitur real-time, tapi monitoring tetap berjalan
+
+---
+
+## 📦 Build & Deployment Checklist
+
+### Pre-Deployment
+- [ ] `npm install` → install `laravel-echo` dan `pusher-js`
+- [ ] `npm run build` → compile Vite assets dengan WebSocket client
+- [ ] Set environment variables WebSocket di platform hosting
+- [ ] Test WebSocket connection dengan `php artisan reverb:start` (jika self-hosted)
+
+### Deployment ke Vercel/Netlify (Static Frontend)
+**CATATAN**: Vercel/Netlify adalah static hosting, **TIDAK BISA** hosting Laravel backend atau WebSocket server.
+
+**Arsitektur yang Benar:**
+1. **Backend Laravel** → Deploy ke **Railway** / **Fly.io** / **DigitalOcean App Platform** / **Heroku**
+2. **Frontend Blade** → Rendered server-side oleh Laravel (bukan static hosting)
+3. **WebSocket** → Pusher (SaaS) atau Reverb (di container terpisah)
+
+### Deployment ke Railway (Recommended untuk Laravel + WebSocket)
+
+**Setup `railway.toml`:**
+```toml
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "php artisan reverb:start & frankenphp run"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+```
+
+**Environment Variables di Railway:**
+```
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=railway-app
+REVERB_APP_KEY=railway-key
+REVERB_APP_SECRET=railway-secret
+REVERB_HOST=${{RAILWAY_PUBLIC_DOMAIN}}
+REVERB_PORT=443
+REVERB_SCHEME=https
+```
+
+---
+
+## 🧪 Testing WebSocket di Development
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Start Reverb server (terminal 1)
+php artisan reverb:start
+
+# 3. Start Laravel server (terminal 2)
+php artisan serve
+
+# 4. Buka browser: http://localhost:8000/dosen
+# 5. Login sebagai dosen, buka Live Monitoring ujian essai
+# 6. Buka tab baru sebagai mahasiswa, mulai ujian essai
+# 7. Ketik di textarea essai → lihat update real-time di tab dosen
+```
+
+**Troubleshooting:**
+- Jika WebSocket tidak connect → Periksa browser console, pastikan `window.Echo` ter-define
+- Jika fallback ke polling → Normal, berarti Reverb belum jalan atau `BROADCAST_CONNECTION=log`
+
+---
 > 2. Buat `.env.testing` seperti template di atas dengan `DB_DATABASE=ujian_unib_test` dan `APP_URL=http://localhost`
 > 3. Buat database test: `CREATE DATABASE ujian_unib_test;`
 > 4. Jalankan `php artisan migrate --env=testing`
